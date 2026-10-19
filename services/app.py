@@ -17,7 +17,7 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -49,6 +49,8 @@ def db():
             status text, decided_by text, created_at text, decided_at text);
         create table if not exists notifications (
             id text primary key, customer text, text text, created_at text);
+        create table if not exists notes (
+            id text primary key, customer text, run_id text, order_id text, text text, created_at text);
         create table if not exists tickets (
             id text primary key, customer text, category text, priority text, summary text, created_at text);
     """)
@@ -95,6 +97,46 @@ async def get_policy():
 async def get_fraud(customer: str):
     await _slow("fraud")
     return {"customer": customer, **data.FRAUD.get(customer, data.DEFAULT_FRAUD)}
+
+
+@app.get("/customers/{customer}/history")
+async def get_history(customer: str):
+    """The customer's memory: past refunds (seeded, plus every payment made since) and the
+    notes earlier runs wrote. The refund count over 30 days is the fraud signal §8 uses."""
+    await _slow("history")
+    seed = data.HISTORY.get(customer, data.DEFAULT_HISTORY)
+    today = datetime.now(timezone.utc)
+    refunds = [{"order_id": r["order_id"], "amount": r["amount"], "reason": r["reason"],
+                "at": (today - timedelta(days=r["days_ago"])).date().isoformat()} for r in seed["refunds"]]
+    orders = [o for o, v in data.ORDERS.items() if v["customer"] == customer]
+    with db() as conn:
+        if orders:
+            marks = ",".join("?" * len(orders))
+            for p in conn.execute(f"select * from payments where order_id in ({marks})", orders):
+                refunds.append({"order_id": p["order_id"], "amount": p["amount"], "reason": "refund paid",
+                                "at": p["created_at"][:10]})
+        notes = [dict(n) for n in conn.execute(
+            "select run_id, order_id, text, created_at from notes where customer = ? order by created_at",
+            (customer,))]
+    cutoff = (today - timedelta(days=30)).date().isoformat()
+    return {"customer": customer, "orders_90d": seed["orders_90d"], "refunds": refunds,
+            "refunds_30d": sum(1 for r in refunds if r["at"] >= cutoff),
+            "refunded_orders": sorted({r["order_id"] for r in refunds}), "notes": notes}
+
+
+class Note(BaseModel):
+    run_id: str
+    order_id: str | None = None
+    text: str
+
+
+@app.post("/customers/{customer}/notes")
+def add_note(customer: str, n: Note):
+    """What a run leaves behind for the next one: one line on what was decided and why."""
+    nid = "note_" + uuid.uuid4().hex[:8]
+    with _lock, db() as conn:
+        conn.execute("insert into notes values (?,?,?,?,?,?)", (nid, customer, n.run_id, n.order_id, n.text, now()))
+    return {"id": nid}
 
 
 # --- writes: approvals (a person), payments (money), notifications ---------------------
@@ -213,7 +255,7 @@ def reset():
     _faults.clear()
     with _lock, db() as conn:
         conn.executescript("delete from payments; delete from approvals; delete from notifications; "
-                           "delete from tickets;")
+                           "delete from tickets; delete from notes;")
     return {"ok": True}
 
 

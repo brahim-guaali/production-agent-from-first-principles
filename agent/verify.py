@@ -1,7 +1,7 @@
 """The verifier (checks that are certain from the facts), carried over from the graph-engineering course."""
 
 
-def check(d, order, policy, fraud):
+def check(d, order, policy, fraud, history=None):
     """Every rule here is certain from the facts, so a failure always means the answer is wrong."""
     problems = []
     if d.clause not in policy["clauses"]:
@@ -22,4 +22,9 @@ def check(d, order, policy, fraud):
     if (d.clause == "§5") != (order["status"] == "cancelled_after_cooking"):
         problems.append(f"§5 applies exactly when the order was cancelled after cooking "
                         f"(status: {order['status']})")
+    if history is not None:
+        if order["order_id"] in history["refunded_orders"] and d.action == "refund":
+            problems.append(f"order {order['order_id']} was already refunded, so §7 requires refuse")
+        if d.clause == "§7" and order["order_id"] not in history["refunded_orders"]:
+            problems.append(f"§7 is for orders already refunded; {order['order_id']} was not")
     return problems

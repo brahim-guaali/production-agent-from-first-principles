@@ -9,14 +9,16 @@ make platform          # http://127.0.0.1:8710/docs for the interactive API
 | Endpoint | What it does | Why it's here |
 |---|---|---|
 | `GET /orders/{id}` | Order with items, total and `minutes_late` | Lateness is a fact computed by code, not a model judgment |
-| `GET /policy` | Refund policy clauses §1–§6 | What the model must cite |
+| `GET /policy` | Refund policy clauses §1–§8 | What the model must cite |
 | `GET /fraud/{customer}` | Fraud score and signals | The third independent lookup |
+| `GET /customers/{id}/history` | Past refunds (seeded, plus every payment since), refunds in the last 30 days, notes earlier runs left | Memory (stage 01): no second refund on one order, frequent claimers |
+| `POST /customers/{id}/notes` | A run leaves one line on what it decided | Memory the agent writes |
 | `POST /approvals`, `POST /approvals/{id}/decision` | An operations manager approves or rejects | A person in the process |
 | `POST /payments` | Moves money; honours an `Idempotency-Key` header | Side effects that must not happen twice |
 | `POST /notifications` | Message to the customer | |
 | `POST /events`, `GET /events/stream`, `GET /ui` | Runs report what they're doing (`agentkit/trace.py`); the page at `/ui` streams it live, and `/ui?replay=<run id>` replays a past run | Seeing a run is how you understand it |
 | `POST /admin/faults` | `{"fraud": 1}`: the next fraud call hangs | Failure on demand for the demos |
-| `POST /admin/reset` | Clears payments, approvals, faults | |
+| `POST /admin/reset` | Clears payments, approvals, notes, faults | |
 
 Each read takes `PLATFORM_LATENCY` seconds (default 2), like real downstream services. Writes go to SQLite in `var/platform.db`, so they outlive the agent: if the agent crashes after paying, the money has still moved.
 
@@ -30,3 +32,5 @@ The refund policy:
 | §4 | Fraud score above 0.7: refuse and escalate |
 | §5 | Cancelled after the restaurant started cooking: no refund, $5 credit |
 | §6 | 45 minutes late or less, nothing missing: apologise, $5 credit |
+| §7 | Order already refunded: refuse a second refund (stage 01) |
+| §8 | Three or more refunds in the last 30 days: any refund needs a manager (stage 01) |

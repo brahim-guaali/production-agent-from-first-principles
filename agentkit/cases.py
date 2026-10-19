@@ -1,5 +1,8 @@
 """Customer messages with the outcome the refund policy requires.
 
+The last two need the customer's history (stage 01): one order was already refunded, and one
+customer has claimed four refunds this month.
+
 REFUND is the running example. CASES is the evaluation set stage 6 scores every design on:
 the expected action, the amount, and whether a manager must approve.
 """
@@ -47,4 +50,10 @@ CASES = [
     {"id": "arabic-late", "customer": "C-1390",
      "message": "طلبي A-9880 وصل بعد ساعة من الموعد والأكل بارد. أريد استرداد المبلغ.",
      "expect": {"action": "refund", "amount": 55, "approval": False}},
+    {"id": "already-refunded", "customer": "C-3570",
+     "message": "Order A-9935 came more than an hour late. I want my money back.",
+     "expect": {"action": "refuse", "amount": 0, "approval": False}},
+    {"id": "frequent-claimer", "customer": "C-2468",
+     "message": "A-9990 arrived without the milkshake. Refund it please.",
+     "expect": {"action": "refund", "amount": 15, "approval": True}},
 ]

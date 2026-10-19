@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from google import genai
 from google.genai import errors, types
 
-MODELS = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash,gemini-3.5-flash-lite").split(",")
+MODELS = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.5-flash").split(",")
 RPM = float(os.environ.get("GEMINI_RPM", "8"))
 
 # Illustrative list prices (USD per 1M tokens) to compare designs; the free tier bills nothing.
@@ -25,12 +25,15 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
     seconds: float = 0.0
+    models: dict = field(default_factory=dict)        # which model answered, and how often
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def add(self, response, seconds):
+    def add(self, response, seconds, model=None):
         u = response.usage_metadata
         with self._lock:
             self.calls += 1
+            if model:
+                self.models[model] = self.models.get(model, 0) + 1
             self.input_tokens += u.prompt_token_count or 0
             self.output_tokens += (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)
             self.seconds += seconds
@@ -40,11 +43,12 @@ class Usage:
         return (self.input_tokens * PRICE_IN + self.output_tokens * PRICE_OUT) / 1e6
 
     def snapshot(self):
-        return {"calls": self.calls, "input_tokens": self.input_tokens,
+        return {"calls": self.calls, "models": dict(self.models), "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens, "cost": round(self.cost, 6)}
 
     def __str__(self):
-        return (f"{self.calls} model calls, {self.input_tokens:,} tokens in, "
+        models = ", ".join(f"{n}× {m}" for m, n in self.models.items())
+        return (f"{self.calls} model calls ({models}), {self.input_tokens:,} tokens in, "
                 f"{self.output_tokens:,} out, ~${self.cost:.4f}")
 
 
@@ -93,7 +97,7 @@ class Gemini:
                 last = e
                 time.sleep(2 ** attempt)
                 continue
-            self.usage.add(response, time.monotonic() - t0)
+            self.usage.add(response, time.monotonic() - t0, model)
             return response
         raise RuntimeError(f"Gemini kept failing: {last}")
 

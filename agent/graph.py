@@ -1,9 +1,11 @@
-"""The refund agent: a LangGraph graph, as it ended the graph-engineering course.
+"""The refund agent: a LangGraph graph, started in the graph-engineering course.
 
-classify -> (order, policy, fraud in parallel) -> decide -> verify -> manager approval if the
-amount is over $500 -> refund (with an idempotency key) -> reply. Messages that aren't refund
-requests go to `support`, a small agent loop inside one node. State is checkpointed in SQLite,
-so a run can pause for the manager and resume in another process.
+classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
+if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an
+idempotency key) -> reply, which leaves a note in the customer's history for the next run.
+Messages that aren't refund requests go to `support`, a small agent loop inside one node.
+State is checkpointed in SQLite, so a run can pause for the manager and resume in another
+process.
 """
 import operator
 import sqlite3
@@ -21,6 +23,8 @@ from agent.support import support_agent
 from agent.verify import check
 
 APPROVAL_LIMIT = 500
+LOOKUPS = ["order", "policy", "fraud", "history"]
+FREQUENT_CLAIMS = 3          # §8: refunds in the last 30 days that send any refund to a manager
 MAX_ATTEMPTS = 3
 DB = Path(__file__).resolve().parents[1] / "var" / "langgraph.db"
 
@@ -32,6 +36,7 @@ class RefundState(TypedDict, total=False):
     order: dict
     policy: dict
     fraud: dict
+    history: dict
     evidence: Annotated[list, operator.add]     # three parallel writers: append
     spent: Annotated[float, operator.add]       # every model call adds its cost
     attempts: Annotated[int, operator.add]
@@ -81,15 +86,22 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         f = platform.get_fraud(s["request"]["customer"])
         return {"fraud": f, "evidence": [f"fraud score {f['score']}"]}
 
+    def history(s, config):
+        h = platform.get_history(s["request"]["customer"])
+        return {"history": h, "evidence": [f"history: {h['refunds_30d']} refunds in 30 days, "
+                                           f"{len(h['notes'])} notes"]}
+
     def decide(s, config):
         feedback = "; ".join(s.get("problems") or []) or None
         claim = judgments.Classification(**s["claim"])
         d, cost = charged(lambda: judgments.decide(llm, s["request"]["message"], claim, s["order"],
-                                                   s["policy"], s["fraud"], feedback))
+                                                   s["policy"], s["fraud"], feedback,
+                                                   s.get("history")))
         return {"decision": d.model_dump(), "spent": cost, "attempts": 1}
 
     def verify(s, config):
-        return {"problems": check(judgments.Decision(**s["decision"]), s["order"], s["policy"], s["fraud"])}
+        return {"problems": check(judgments.Decision(**s["decision"]), s["order"], s["policy"], s["fraud"],
+                                  s.get("history"))}
 
     def ask_manager(s, config):
         d = s["decision"]
@@ -109,6 +121,12 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         text = s["decision"]["customer_message"]
         if s.get("approval") == "rejected":
             text = "We reviewed your request and can't refund this order. A colleague will follow up."
+        d = s["decision"]
+        note = f"{d['action']} ${d['amount']:g} under {d['clause']}: {d['reason']}"
+        if s.get("approval") == "rejected":
+            note = f"manager rejected a ${d['amount']:g} refund"
+        platform.add_note(s["request"]["customer"], config["configurable"]["thread_id"],
+                          s["order"]["order_id"], note)
         return {"reply": platform.notify(s["request"]["customer"], text) | {"text": text}}
 
     def support(s, config):
@@ -125,14 +143,14 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
                      ("ask_manager", ask_manager), ("approval", approval), ("refund", refund),
                      ("reply", reply), ("support", support), ("escalate", escalate)]:
         g.add_node(name, traced(name, fn))
-    for name, fn in [("order", order), ("policy", policy), ("fraud", fraud)]:
+    for name, fn in [("order", order), ("policy", policy), ("fraud", fraud), ("history", history)]:
         g.add_node(name, traced(name, fn), retry_policy=lookups)
 
     g.add_edge(START, "classify")
-    g.add_conditional_edges("classify", lambda s: ["order", "policy", "fraud"]
+    g.add_conditional_edges("classify", lambda s: LOOKUPS
                             if s["claim"]["kind"] == "refund_request" else "support",
-                            ["order", "policy", "fraud", "support"])
-    g.add_edge(["order", "policy", "fraud"], "decide")
+                            LOOKUPS + ["support"])
+    g.add_edge(LOOKUPS, "decide")
     g.add_edge("decide", "verify")
     g.add_conditional_edges("verify", route_after_verify,
                             ["decide", "escalate", "ask_manager", "refund", "reply"])
@@ -155,7 +173,13 @@ def route_after_verify(s):
     d = s["decision"]
     if d["action"] != "refund":
         return "reply"
-    return "ask_manager" if d["amount"] > APPROVAL_LIMIT else "refund"
+    return "ask_manager" if needs_manager(s) else "refund"
+
+
+def needs_manager(s):
+    """§3 and §8 are code: the amount, or a customer who claims often."""
+    frequent = s.get("history", {}).get("refunds_30d", 0) >= FREQUENT_CLAIMS
+    return s["decision"]["amount"] > APPROVAL_LIMIT or frequent
 
 
 def spec(graph):
@@ -164,7 +188,7 @@ def spec(graph):
     nodes = [n for n in drawable.nodes if not n.startswith("__")]
     kinds = {"classify": "model", "decide": "model", "support": "model · loop inside",
              "approval": "person", "refund": "http · money", "order": "http", "policy": "http",
-             "fraud": "http", "ask_manager": "http", "reply": "http"}
+             "fraud": "http", "history": "http · memory", "ask_manager": "http", "reply": "http"}
     edges = [{"from": e.source, "to": e.target, "cond": e.conditional}
              for e in drawable.edges if not e.source.startswith("__") and not e.target.startswith("__")]
     return {"entry": "classify", "nodes": [{"id": n, "kind": kinds.get(n, "code")} for n in nodes],

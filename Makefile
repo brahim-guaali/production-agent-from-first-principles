@@ -10,4 +10,10 @@ platform:         ## start the food-delivery platform API on :8710
 test:             ## run the test suite (no API key needed)
 	$(PY) -m pytest -q
 
-.PHONY: setup platform test
+stage-%:          ## run one stage on the real model, e.g. make stage-01
+	$(PY) $(wildcard $*-*/run.py)
+
+record:           ## re-run every stage and export the traced runs (viz/record_runs.sh)
+	viz/record_runs.sh
+
+.PHONY: setup platform test record

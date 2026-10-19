@@ -22,7 +22,7 @@ make platform                               # terminal 1, on :8710
 python 00-baseline/run.py                   # terminal 2: happy | twice | support
 ```
 
-## Real run (gemini-3.5-flash, 2026-10-20)
+## Real run (Gemini free tier, 2026-10-20)
 
 | Scene | Result |
 |---|---|

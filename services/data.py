@@ -4,7 +4,7 @@ Each order comes with the times the platform recorded, so lateness is a fact com
 code (`minutes_late`), not something we ask a model to work out.
 """
 
-POLICY_VERSION = "v3"
+POLICY_VERSION = "v4"
 
 POLICY = {
     "§1": "Delivered more than 45 minutes after the promised time: full refund of the order total.",
@@ -13,6 +13,8 @@ POLICY = {
     "§4": "Fraud score above 0.7: refuse the refund and escalate to the risk team.",
     "§5": "Order cancelled by the customer after the restaurant started cooking: no refund, offer $5 credit.",
     "§6": "Late by 45 minutes or less with every item delivered: apologise and offer $5 credit, no refund.",
+    "§7": "An order that was already refunded: refuse a second refund.",
+    "§8": "Three or more refunds in the last 30 days: any refund needs an operations manager's approval.",
 }
 
 
@@ -54,9 +56,27 @@ ORDERS = {o["order_id"]: o for o in [
             {"name": "Fries", "price": 6}], "21:00", "21:05"),
     _order("A-9880", "C-1390", "Mandi House",
            [{"name": "Lamb mandi", "price": 55}], "14:00", "15:02"),
+    _order("A-9935", "C-3570", "Noodle Box",
+           [{"name": "Pad thai", "price": 31}, {"name": "Spring rolls", "price": 17}], "19:30", "20:41"),
+    _order("A-9990", "C-2468", "Burger Lab",
+           [{"name": "Classic burger", "price": 54}, {"name": "Milkshake", "price": 15}], "20:00", "20:10"),
 ]}
 
 FRAUD = {
     "C-5520": {"score": 0.86, "signals": ["7 refund claims in 30 days", "new device", "address changed today"]},
 }
+# What the platform remembers about a customer before any run: refunds paid in the past
+# (days_ago is turned into a date when asked). Refunds the agent pays are added from the
+# payments table, so the history grows as the agent works.
+HISTORY = {
+    "C-3570": {"orders_90d": 14, "refunds": [
+        {"order_id": "A-9935", "amount": 48, "days_ago": 2, "reason": "late delivery"}]},
+    "C-2468": {"orders_90d": 9, "refunds": [
+        {"order_id": "A-8811", "amount": 22, "days_ago": 4, "reason": "missing item"},
+        {"order_id": "A-8640", "amount": 35, "days_ago": 11, "reason": "spoiled item"},
+        {"order_id": "A-8502", "amount": 18, "days_ago": 19, "reason": "missing item"},
+        {"order_id": "A-8377", "amount": 41, "days_ago": 27, "reason": "late delivery"}]},
+}
+DEFAULT_HISTORY = {"orders_90d": 6, "refunds": []}
+
 DEFAULT_FRAUD = {"score": 0.08, "signals": ["account older than 2 years", "refund rate below 2%"]}

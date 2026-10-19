@@ -13,7 +13,7 @@ def test_the_agent_pauses_for_the_manager_resumes_and_pays_once(platform, tmp_pa
     g.invoke({"request": REFUND}, config)
     assert g.get_state(config).next == ("approval",)
     state = g.invoke(Command(resume="approved"), config)
-    assert len(state["evidence"]) == 3
+    assert len(state["evidence"]) == 4                   # order, policy, fraud, history (01)
     payments = Platform(platform).payments("A-7731")
     assert payments["count"] == 1 and payments["payments"][0]["idempotency_key"] == "t1:refund"
 

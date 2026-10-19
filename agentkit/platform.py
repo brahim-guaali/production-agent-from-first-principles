@@ -31,6 +31,13 @@ class Platform:
     def get_fraud(self, customer):
         return self._get(f"/fraud/{customer}")
 
+    # memory
+    def get_history(self, customer):
+        return self._get(f"/customers/{customer}/history")
+
+    def add_note(self, customer, run_id, order_id, text):
+        return self._post(f"/customers/{customer}/notes", {"run_id": run_id, "order_id": order_id, "text": text})
+
     # a person
     def request_approval(self, run_id, order_id, amount, reason):
         return self._post("/approvals", {"run_id": run_id, "order_id": order_id,

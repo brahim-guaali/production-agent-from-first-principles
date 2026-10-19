@@ -13,19 +13,30 @@ The agent comes from [graph engineering from first principles](https://github.co
 |---|---|---|
 | 00 | [`00-baseline/`](00-baseline/) | The refund agent we start from, and why it's still a toy |
 | | **Part 1 · A realistic agent** | |
-| 01 | `01-memory/` | The customer's history as a tool: past refunds, a fraud signal, no second refund on one order |
+| 01 | [`01-memory/`](01-memory/) | The customer's history: past refunds, notes from earlier runs, no second refund on one order, frequent claimers go to a manager |
 | 02 | `02-conversations/` | Sessions over several turns ("why only $72?") |
-| 03 | `03-tool-failures/` | Services that answer 500, bad data or 404, not only hang |
-| 04 | `04-traffic/` | A replayer: the cases hundreds of times with variations |
-| 05 | `05-outside-signals/` | Customer ratings; the prompt and model version on every run |
+| 03 | `03-sub-agents/` | Fraud-review and policy sub-agents, hand-offs |
+| 04 | `04-streaming/` | Streamed replies: time to first token, aborted streams |
+| 05 | `05-failures/` | 500s, bad data, hangs, invalid model output, 429s and model fallback |
+| 06 | `06-guardrails/` | Prompt-injection detection |
+| 07 | `07-traffic/` | A replayer: the cases hundreds of times with variations |
+| 08 | `08-signals/` | Customer ratings; prompt, model and environment on every run |
 | | **Part 2 · The camera** | |
-| 06 | `06-traces/` | OpenTelemetry GenAI spans written by hand, a timeline, customer data redacted |
-| 07 | `07-meter/` | A metering proxy: budget check before each call, cost after, a budget stop |
+| 09 | `09-spans/` | OpenTelemetry GenAI spans by hand: model, tool, memory, sub-agent, sessions, the manager's wait |
+| 10 | `10-data-path/` | Exporter, collector, metrics; latency percentiles and a dashboard |
+| 11 | `11-privacy/` | Redacting customer data, content capture off by default, retention |
+| 12 | `12-cost/` | Cost per run, customer and day; cache hits; a metering proxy with a budget stop |
+| 13 | `13-sampling/` | Head vs tail sampling at volume |
+| 14 | `14-alerts/` | SLOs, alerts, drift |
+| 15 | `15-debugging/` | Find a bad run, replay it from its checkpoint, compare two runs |
+| 16 | `16-ab-test/` | Two prompt versions on live traffic |
 | | **Part 3 · The referee** | |
-| 08 | `08-evals/` | Deterministic evals read from traces |
-| 09 | `09-judge/` | An LLM judge, calibrated against labels a person wrote |
-| 10 | `10-release-gate/` | GitHub Actions blocks a change that makes the agent worse |
-| 11 | `11-platforms/` | The same spans in Phoenix and Langfuse: what a platform adds |
+| 17 | `17-annotation/` | A human annotation queue |
+| 18 | `18-evals/` | Offline evals and deterministic checks read from traces |
+| 19 | `19-judge/` | An LLM judge calibrated against a person's labels, position bias |
+| 20 | `20-online-evals/` | Scoring live traffic; bad traces become new eval cases |
+| 21 | `21-release-gate/` | GitHub Actions blocks a change that makes the agent worse |
+| 22 | `22-platforms/` | The same spans in Phoenix and Langfuse, next to auto-instrumentation |
 
 The agent lives in [`agent/`](agent/) and grows stage by stage; each stage is tagged (`stage-01`, …) so you can check out the agent as it was.
 
