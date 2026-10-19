@@ -3,6 +3,9 @@
 classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
 if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an
 idempotency key) -> reply, which leaves a note in the customer's history for the next run.
+A follow-up in a conversation ("why only $72?") goes to `explain`, which answers from the
+session and the notes, or hands the customer to a person. Every run belongs to a session
+(stage 02): the customer's message and the agent's reply are stored as turns.
 Messages that aren't refund requests go to `support`, a small agent loop inside one node.
 State is checkpointed in SQLite, so a run can pause for the manager and resume in another
 process.
@@ -31,6 +34,7 @@ DB = Path(__file__).resolve().parents[1] / "var" / "langgraph.db"
 
 class RefundState(TypedDict, total=False):
     request: dict
+    session: dict
     budget: Optional[float]
     claim: dict
     order: dict
@@ -70,9 +74,38 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         out = call()
         return out, llm.usage.cost - before
 
+    def run_id(config):
+        return config["configurable"]["thread_id"]
+
+    def session_of(s, config):
+        return s["request"].get("session_id") or run_id(config)
+
+    def say(s, config, text):
+        """The agent's side of the conversation: a stored turn and a message to the customer."""
+        r = s["request"]
+        platform.add_turn(session_of(s, config), r["customer"], "agent", text, run_id(config))
+        return platform.notify(r["customer"], text) | {"text": text}
+
+    def session(s, config):
+        r = s["request"]
+        before = platform.get_session(session_of(s, config))
+        platform.add_turn(session_of(s, config), r["customer"], "customer", r["message"], run_id(config))
+        return {"session": before, "evidence": [f"session: {len(before['turns'])} earlier turns"]}
+
     def classify(s, config):
-        claim, cost = charged(lambda: judgments.classify(llm, s["request"]["message"]))
+        claim, cost = charged(lambda: judgments.classify(llm, s["request"]["message"], s["session"]["turns"]))
         return {"claim": claim.model_dump(), "spent": cost}
+
+    def explain(s, config):
+        r = s["request"]
+        notes = platform.get_history(r["customer"])["notes"]
+        e, cost = charged(lambda: judgments.explain(llm, r["message"], s["session"]["turns"], notes,
+                                                    platform.get_policy()))
+        reply = say(s, config, e.answer) | {"explanation": e.model_dump()}
+        if e.wants_person:
+            reply["ticket"] = platform.create_ticket(r["customer"], "other", "normal",
+                                                     f"Disputes an earlier decision: {r['message'][:120]}")
+        return {"reply": reply, "spent": cost}
 
     def order(s, config):
         o = platform.get_order(s["claim"]["order_id"])
@@ -125,31 +158,33 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         note = f"{d['action']} ${d['amount']:g} under {d['clause']}: {d['reason']}"
         if s.get("approval") == "rejected":
             note = f"manager rejected a ${d['amount']:g} refund"
-        platform.add_note(s["request"]["customer"], config["configurable"]["thread_id"],
-                          s["order"]["order_id"], note)
-        return {"reply": platform.notify(s["request"]["customer"], text) | {"text": text}}
+        platform.add_note(s["request"]["customer"], run_id(config), s["order"]["order_id"], note)
+        return {"reply": say(s, config, text)}
 
     def support(s, config):
         # The hybrid: open-ended work, so a small agent loop runs *inside* this one node.
-        return {"reply": support_agent(llm, platform, s["request"], tracer)}
+        out = support_agent(llm, platform, s["request"], tracer)
+        platform.add_turn(session_of(s, config), s["request"]["customer"], "agent", out["text"], run_id(config))
+        return {"reply": out}
 
     def escalate(s, config):
-        return {"reply": {"queue": "support-escalations", "why": s.get("problems") or "over budget"}}
+        text = "Thanks for your patience. A colleague will look at this and get back to you today."
+        return {"reply": say(s, config, text) | {"queue": "support-escalations",
+                                                  "why": s.get("problems") or "over budget"}}
 
     lookups = RetryPolicy(max_attempts=3, initial_interval=0.5,
                           retry_on=(httpx.TimeoutException, httpx.ConnectError))
     g = StateGraph(RefundState)
-    for name, fn in [("classify", classify), ("decide", decide), ("verify", verify),
+    for name, fn in [("session", session), ("classify", classify), ("explain", explain), ("decide", decide), ("verify", verify),
                      ("ask_manager", ask_manager), ("approval", approval), ("refund", refund),
                      ("reply", reply), ("support", support), ("escalate", escalate)]:
         g.add_node(name, traced(name, fn))
     for name, fn in [("order", order), ("policy", policy), ("fraud", fraud), ("history", history)]:
         g.add_node(name, traced(name, fn), retry_policy=lookups)
 
-    g.add_edge(START, "classify")
-    g.add_conditional_edges("classify", lambda s: LOOKUPS
-                            if s["claim"]["kind"] == "refund_request" else "support",
-                            LOOKUPS + ["support"])
+    g.add_edge(START, "session")
+    g.add_edge("session", "classify")
+    g.add_conditional_edges("classify", route_after_classify, LOOKUPS + ["explain", "support"])
     g.add_edge(LOOKUPS, "decide")
     g.add_edge("decide", "verify")
     g.add_conditional_edges("verify", route_after_verify,
@@ -158,11 +193,20 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
     g.add_conditional_edges("approval", lambda s: "refund" if s["approval"] == "approved" else "reply",
                             ["refund", "reply"])
     g.add_edge("refund", "reply")
-    for done in ("reply", "support", "escalate"):
+    for done in ("reply", "support", "escalate", "explain"):
         g.add_edge(done, END)
 
     db.parent.mkdir(parents=True, exist_ok=True)
     return g.compile(checkpointer=SqliteSaver(sqlite3.connect(db, check_same_thread=False)))
+
+
+def route_after_classify(s):
+    kind = s["claim"]["kind"]
+    if kind == "follow_up" and s["session"]["turns"]:
+        return "explain"
+    if kind == "refund_request" and s["claim"].get("order_id"):
+        return LOOKUPS
+    return "support"
 
 
 def route_after_verify(s):
@@ -186,10 +230,10 @@ def spec(graph):
     """Nodes and edges for the live viewer, read from LangGraph's own description of the graph."""
     drawable = graph.get_graph()
     nodes = [n for n in drawable.nodes if not n.startswith("__")]
-    kinds = {"classify": "model", "decide": "model", "support": "model · loop inside",
+    kinds = {"session": "http · memory", "explain": "model", "classify": "model", "decide": "model", "support": "model · loop inside",
              "approval": "person", "refund": "http · money", "order": "http", "policy": "http",
              "fraud": "http", "history": "http · memory", "ask_manager": "http", "reply": "http"}
     edges = [{"from": e.source, "to": e.target, "cond": e.conditional}
              for e in drawable.edges if not e.source.startswith("__") and not e.target.startswith("__")]
-    return {"entry": "classify", "nodes": [{"id": n, "kind": kinds.get(n, "code")} for n in nodes],
+    return {"entry": "session", "nodes": [{"id": n, "kind": kinds.get(n, "code")} for n in nodes],
             "edges": edges}

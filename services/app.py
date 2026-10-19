@@ -49,6 +49,9 @@ def db():
             status text, decided_by text, created_at text, decided_at text);
         create table if not exists notifications (
             id text primary key, customer text, text text, created_at text);
+        create table if not exists turns (
+            id integer primary key autoincrement, session_id text, customer text, role text,
+            text text, run_id text, created_at text);
         create table if not exists notes (
             id text primary key, customer text, run_id text, order_id text, text text, created_at text);
         create table if not exists tickets (
@@ -137,6 +140,30 @@ def add_note(customer: str, n: Note):
     with _lock, db() as conn:
         conn.execute("insert into notes values (?,?,?,?,?,?)", (nid, customer, n.run_id, n.order_id, n.text, now()))
     return {"id": nid}
+
+
+class Turn(BaseModel):
+    customer: str
+    role: str                # customer | agent
+    text: str
+    run_id: str | None = None
+
+
+@app.post("/sessions/{session_id}/turns")
+def add_turn(session_id: str, t: Turn):
+    """A conversation is a session: every message in and every reply out, in order."""
+    with _lock, db() as conn:
+        conn.execute("insert into turns (session_id, customer, role, text, run_id, created_at) values (?,?,?,?,?,?)",
+                     (session_id, t.customer, t.role, t.text, t.run_id, now()))
+    return get_session(session_id)
+
+
+@app.get("/sessions/{session_id}")
+def get_session(session_id: str):
+    with db() as conn:
+        turns = [dict(r) for r in conn.execute(
+            "select role, text, run_id, created_at from turns where session_id = ? order by id", (session_id,))]
+    return {"session_id": session_id, "turns": turns}
 
 
 # --- writes: approvals (a person), payments (money), notifications ---------------------
@@ -255,7 +282,7 @@ def reset():
     _faults.clear()
     with _lock, db() as conn:
         conn.executescript("delete from payments; delete from approvals; delete from notifications; "
-                           "delete from tickets; delete from notes;")
+                           "delete from tickets; delete from notes; delete from turns;")
     return {"ok": True}
 
 
