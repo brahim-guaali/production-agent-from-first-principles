@@ -19,7 +19,7 @@ def test_the_agent_pauses_for_the_manager_resumes_and_pays_once(platform, tmp_pa
     assert payments["count"] == 1 and payments["payments"][0]["idempotency_key"] == "t1:refund"
 
 
-def test_a_retry_policy_absorbs_a_hung_lookup(platform, tmp_path):
+def test_a_retried_lookup_absorbs_a_hang(platform, tmp_path):
     Platform(platform).inject_faults(fraud=1)
     dessert = next(c for c in CASES if c["id"] == "missing-dessert")
     g = build(ScriptedStructured(answers(order_id="A-8120", amount=18, clause="§2")),

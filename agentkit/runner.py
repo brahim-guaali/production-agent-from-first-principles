@@ -14,8 +14,8 @@ from agentkit.llm import Gemini
 from agentkit.trace import Tracer
 
 
-def run_case(case, platform, stage, title=None, manager="approved", prefix="r"):
-    llm = Gemini()
+def run_case(case, platform, stage, title=None, manager="approved", prefix="r", llm=None):
+    llm = llm or Gemini()
     thread = f"{prefix}-" + uuid.uuid4().hex[:6]
     tracer = Tracer(stage, title or case.get("id", "run"), usage=llm.usage, run_id=thread)
     graph = build(llm, platform, tracer)

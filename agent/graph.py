@@ -3,7 +3,9 @@
 classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
 if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an
 idempotency key) -> reply, which leaves a note in the customer's history for the next run.
-The refund reply is streamed to the customer's chat as it's written (stage 04).
+Lookups retry transient errors and validate what they get; a lookup that still fails is
+recorded in `failures` and the run escalates with a reply that says what went wrong
+(stage 05). The refund reply is streamed to the customer's chat as it's written (stage 04).
 A follow-up in a conversation ("why only $72?") goes to `explain`, which answers from the
 session and the notes, or hands the customer to a person. Every run belongs to a session
 (stage 02): the customer's message and the agent's reply are stored as turns.
@@ -18,13 +20,14 @@ import sqlite3
 from pathlib import Path
 from typing import Annotated, Optional, TypedDict
 
-import httpx
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import RetryPolicy, interrupt
+from langgraph.types import interrupt
+from pydantic import ValidationError
 
 from agentkit import judgments
 from agentkit.trace import NullTracer
+from agent import lookups as lk
 from agent.subagents import FRAUD_REVIEW, POLICY_EXPERT
 from agent.support import support_agent
 from agent.verify import check
@@ -47,6 +50,7 @@ class RefundState(TypedDict, total=False):
     history: dict
     fraud_review: dict
     handoffs: Annotated[list, operator.add]     # every call to a sub-agent, in order
+    failures: Annotated[list, operator.add]     # lookups that failed after retries (stage 05)
     evidence: Annotated[list, operator.add]     # three parallel writers: append
     spent: Annotated[float, operator.add]       # every model call adds its cost
     attempts: Annotated[int, operator.add]
@@ -117,22 +121,30 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
                                                      f"Disputes an earlier decision: {r['message'][:120]}")
         return {"reply": reply, "spent": cost, "handoffs": [handoff]}
 
+    def looked_up(field, service, call, schema, describe):
+        """A lookup node: fetch with retries and a schema check; a failure is data, not a crash."""
+        value, failure, attempts = lk.fetch(service, call, schema, tracer)
+        if failure:
+            return {"failures": [failure], "evidence": [f"{service}: FAILED ({failure['kind']}, "
+                                                        f"{failure['attempts']} attempts)"]}
+        retried = f" after {attempts} attempts" if attempts > 1 else ""
+        return {field: value, "evidence": [describe(value) + retried]}
+
     def order(s, config):
-        o = platform.get_order(s["claim"]["order_id"])
-        return {"order": o, "evidence": [f"order {o['order_id']}: ${o['total']}, {o['minutes_late']} min late"]}
+        return looked_up("order", "orders", lambda: platform.get_order(s["claim"]["order_id"]), lk.Order,
+                         lambda o: f"order {o['order_id']}: ${o['total']}, {o['minutes_late']} min late")
 
     def policy(s, config):
-        p = platform.get_policy()
-        return {"policy": p, "evidence": [f"policy {p['version']}"]}
+        return looked_up("policy", "policy", platform.get_policy, lk.Policy, lambda p: f"policy {p['version']}")
 
     def fraud(s, config):
-        f = platform.get_fraud(s["request"]["customer"])
-        return {"fraud": f, "evidence": [f"fraud score {f['score']}"]}
+        return looked_up("fraud", "fraud", lambda: platform.get_fraud(s["request"]["customer"]), lk.Fraud,
+                         lambda f: f"fraud score {f['score']}")
 
     def history(s, config):
-        h = platform.get_history(s["request"]["customer"])
-        return {"history": h, "evidence": [f"history: {h['refunds_30d']} refunds in 30 days, "
-                                           f"{len(h['notes'])} notes"]}
+        return looked_up("history", "history", lambda: platform.get_history(s["request"]["customer"]),
+                         lk.History, lambda h: f"history: {h['refunds_30d']} refunds in 30 days, "
+                                               f"{len(h['notes'])} notes")
 
     def screen(s, config):
         return {}                                   # code only: the route below decides
@@ -148,12 +160,18 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
     def decide(s, config):
         feedback = "; ".join(s.get("problems") or []) or None
         claim = judgments.Classification(**s["claim"])
-        d, cost = charged(lambda: judgments.decide(llm, s["request"]["message"], claim, s["order"],
-                                                   s["policy"], s["fraud"], feedback,
-                                                   s.get("history"), s.get("fraud_review")))
-        return {"decision": d.model_dump(), "spent": cost, "attempts": 1}
+        try:
+            d, cost = charged(lambda: judgments.decide(llm, s["request"]["message"], claim, s["order"],
+                                                       s["policy"], s["fraud"], feedback,
+                                                       s.get("history"), s.get("fraud_review")))
+        except ValidationError as e:                 # the model's JSON didn't fit the schema
+            return {"decision": None, "attempts": 1,
+                    "problems": [f"your answer was not valid JSON for the schema: {str(e).splitlines()[0]}"]}
+        return {"decision": d.model_dump(), "spent": cost, "attempts": 1, "problems": []}
 
     def verify(s, config):
+        if s.get("decision") is None:
+            return {"problems": s.get("problems") or ["no decision"]}
         return {"problems": check(judgments.Decision(**s["decision"]), s["order"], s["policy"], s["fraud"],
                                   s.get("history"), s.get("fraud_review"))}
 
@@ -204,12 +222,15 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         return {"reply": out}
 
     def escalate(s, config):
-        text = "Thanks for your patience. A colleague will look at this and get back to you today."
-        return {"reply": say(s, config, text) | {"queue": "support-escalations",
-                                                  "why": s.get("problems") or "over budget"}}
+        failures = s.get("failures") or []
+        if failures:
+            text = lk.failure_message(failures, s.get("claim", {}).get("order_id"))
+            why = [f"{f['service']}: {f['kind']} after {f['attempts']} attempts" for f in failures]
+        else:
+            text = "Thanks for your patience. A colleague will look at this and get back to you today."
+            why = s.get("problems") or "over budget"
+        return {"reply": say(s, config, text) | {"queue": "support-escalations", "why": why}}
 
-    lookups = RetryPolicy(max_attempts=3, initial_interval=0.5,
-                          retry_on=(httpx.TimeoutException, httpx.ConnectError))
     g = StateGraph(RefundState)
     for name, fn in [("session", session), ("classify", classify), ("explain", explain), ("screen", screen),
                      ("fraud_review", fraud_review), ("decide", decide), ("verify", verify),
@@ -217,14 +238,13 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
                      ("reply", reply), ("support", support), ("escalate", escalate)]:
         g.add_node(name, traced(name, fn))
     for name, fn in [("order", order), ("policy", policy), ("fraud", fraud), ("history", history)]:
-        g.add_node(name, traced(name, fn), retry_policy=lookups)
+        g.add_node(name, traced(name, fn))           # retries live in lookups.fetch (stage 05)
 
     g.add_edge(START, "session")
     g.add_edge("session", "classify")
     g.add_conditional_edges("classify", route_after_classify, LOOKUPS + ["explain", "support"])
     g.add_edge(LOOKUPS, "screen")
-    g.add_conditional_edges("screen", lambda s: "fraud_review" if grey_zone(s["fraud"]) else "decide",
-                            ["fraud_review", "decide"])
+    g.add_conditional_edges("screen", route_after_lookups, ["escalate", "fraud_review", "decide"])
     g.add_edge("fraud_review", "decide")
     g.add_edge("decide", "verify")
     g.add_conditional_edges("verify", route_after_verify,
@@ -238,6 +258,12 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
 
     db.parent.mkdir(parents=True, exist_ok=True)
     return g.compile(checkpointer=SqliteSaver(sqlite3.connect(db, check_same_thread=False)))
+
+
+def route_after_lookups(s):
+    if s.get("failures"):
+        return "escalate"                 # never decide on missing facts (stage 05)
+    return "fraud_review" if grey_zone(s["fraud"]) else "decide"
 
 
 def grey_zone(fraud):

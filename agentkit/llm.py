@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from google import genai
 from google.genai import errors, types
 
-MODELS = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.5-flash").split(",")
+MODELS = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
 RPM = float(os.environ.get("GEMINI_RPM", "8"))
 
 # Illustrative list prices (USD per 1M tokens) to compare designs; the free tier bills nothing.
@@ -26,6 +26,7 @@ class Usage:
     output_tokens: int = 0
     seconds: float = 0.0
     models: dict = field(default_factory=dict)        # which model answered, and how often
+    events: list = field(default_factory=list)        # 429s, server errors, fallbacks (stage 05)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, response, seconds, model=None):
@@ -67,6 +68,11 @@ class _RateLimiter:
 
 
 _limiter = _RateLimiter(RPM)
+_exhausted: set = set()          # models whose free daily quota ran out in this process
+
+
+class _MidStream(Exception):
+    """A stream that failed after words reached the customer: retrying would repeat them."""
 
 
 class Gemini:
@@ -77,29 +83,56 @@ class Gemini:
         self.models = models or MODELS
         self.usage = usage or Usage()
 
-    def _generate(self, contents, config):
-        """One model call with rate limiting, retries and model fallback."""
-        last = None
+    corrupt = {}              # fault injection (stage 05): {"Decision": 1} breaks the next Decision answer
+
+    def _event(self, kind, model, attempt, **extra):
+        with self.usage._lock:
+            self.usage.events.append({"kind": kind, "model": model, "attempt": attempt, **extra})
+
+    def _model_for(self, attempt):
+        """Two tries per model, in order, skipping models whose daily quota is spent."""
+        usable = [m for m in self.models if m not in _exhausted] or self.models[-1:]
+        return usable[min(attempt // 2, len(usable) - 1)]
+
+    def _with_retries(self, work):
+        """Run work(model) with rate limiting, retries on 429/5xx/dropped connections and model
+        fallback. Every retry, quota hit and fallback is recorded in usage.events (stage 05)."""
+        last, previous = None, None
         for attempt in range(6):
-            model = self.models[min(attempt // 2, len(self.models) - 1)]
+            model = self._model_for(attempt)
+            if previous and model != previous:
+                self._event("fallback", model, attempt + 1, after=previous)
+            previous = model
             _limiter.wait()
-            t0 = time.monotonic()
             try:
-                response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                return work(model)
             except (errors.ServerError, errors.ClientError) as e:
                 code = getattr(e, "code", None)
                 if code not in (429, 500, 503) and isinstance(e, errors.ClientError):
                     raise
                 last = e
-                time.sleep(min(30, 2 ** attempt * 2))
-                continue
-            except Exception as e:  # dropped connections
+                if code == 429 and "PerDay" in str(e):
+                    _exhausted.add(model)                  # no point retrying until tomorrow
+                    self._event("daily_quota_exhausted", model, attempt + 1)
+                    continue
+                wait = min(30, 2 ** attempt * 2)
+                self._event("rate_limited" if code == 429 else f"server_error_{code}", model, attempt + 1, wait=wait)
+                time.sleep(wait)
+            except _MidStream:
+                raise
+            except Exception as e:                         # dropped connections
                 last = e
+                self._event("connection_error", model, attempt + 1, error=type(e).__name__)
                 time.sleep(2 ** attempt)
-                continue
+        raise RuntimeError(f"Gemini kept failing: {last}")
+
+    def _generate(self, contents, config):
+        def work(model):
+            t0 = time.monotonic()
+            response = self.client.models.generate_content(model=model, contents=contents, config=config)
             self.usage.add(response, time.monotonic() - t0, model)
             return response
-        raise RuntimeError(f"Gemini kept failing: {last}")
+        return self._with_retries(work)
 
     def chat(self, system, contents, tools):
         """For the agent loop: the model sees the whole transcript and may call tools."""
@@ -116,44 +149,30 @@ class Gemini:
         arrives; if it returns False the customer is gone, so we stop generating. Returns the
         text, time to first token, total time, number of chunks and whether it was cut off."""
         config = types.GenerateContentConfig(system_instruction=system, temperature=0.3)
-        last = None
-        for attempt in range(4):
-            model = self.models[min(attempt // 2, len(self.models) - 1)]
-            _limiter.wait()
+
+        def work(model):
             t0, text, chunks, ttft, final = time.monotonic(), "", 0, None, None
+            stream = self.client.models.generate_content_stream(model=model, contents=prompt, config=config)
             try:
-                stream = self.client.models.generate_content_stream(model=model, contents=prompt, config=config)
                 for response in stream:
-                    piece = response.text or ""
-                    final = response
+                    final, piece = response, response.text or ""
                     if not piece:
                         continue
-                    if ttft is None:
-                        ttft = time.monotonic() - t0
+                    ttft = ttft if ttft is not None else time.monotonic() - t0
                     text, chunks = text + piece, chunks + 1
                     if on_chunk(piece) is False:
-                        stream.close()                      # stop paying for words nobody reads
+                        stream.close()                     # stop paying for words nobody reads
                         break
-                else:
-                    pass
-            except (errors.ServerError, errors.ClientError) as e:
-                if chunks:                                   # failed mid-stream: keep what was said
-                    raise
-                if getattr(e, "code", None) not in (429, 500, 503) and isinstance(e, errors.ClientError):
-                    raise
-                last = e
-                time.sleep(min(30, 2 ** attempt * 2))
-                continue
+            except Exception as e:
+                if chunks:                                 # failed mid-stream: words already reached the customer
+                    raise _MidStream(e) from e
+                raise
             aborted = final is None or not (final.candidates and final.candidates[0].finish_reason)
             if final is not None and final.usage_metadata:
                 self.usage.add(final, time.monotonic() - t0, model)
-            else:
-                with self.usage._lock:
-                    self.usage.calls += 1
-                    self.usage.models[model] = self.usage.models.get(model, 0) + 1
             return {"text": text, "ttft": ttft, "seconds": time.monotonic() - t0, "chunks": chunks,
                     "aborted": aborted, "model": model}
-        raise RuntimeError(f"Gemini kept failing: {last}")
+        return self._with_retries(work)
 
     def structured(self, system, prompt, schema):
         """For a graph node: one narrow question in, one typed answer (a pydantic model) out."""
@@ -164,4 +183,8 @@ class Gemini:
             temperature=0,
         )
         response = self._generate(prompt, config)
+        if self.corrupt.get(schema.__name__, 0) > 0:     # as if the model stopped mid-JSON
+            self.corrupt[schema.__name__] -= 1
+            self._event("invalid_output", "injected", 1)
+            return schema.model_validate_json(response.text[: len(response.text) // 2])
         return response.parsed if response.parsed is not None else schema.model_validate_json(response.text)

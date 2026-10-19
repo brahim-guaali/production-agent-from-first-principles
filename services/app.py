@@ -7,8 +7,9 @@ see what running them one after another costs. Payments, approvals and notificat
 stored in SQLite, so they outlive the agent: if the agent crashes after paying, the money
 has still moved.
 
-Faults are injected over HTTP, so a demo can make the fraud service hang the next time
-it is called:  POST /admin/faults {"fraud": 1}
+Faults are injected over HTTP, so a demo can make a service misbehave the next n times it
+is called: POST /admin/faults {"fraud": 1} hangs, {"orders:500": 2} answers 500 twice,
+{"orders:bad": 1} returns a broken record once (stage 05).
 """
 import asyncio
 import json
@@ -69,12 +70,21 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _take(key):
+    """Use up one injected fault, if any is left."""
+    if _faults.get(key, 0) > 0:
+        _faults[key] -= 1
+        return True
+    return False
+
+
 async def _slow(service):
-    """Every read takes LATENCY seconds; an injected fault makes it hang instead."""
-    if _faults.get(service, 0) > 0:
-        _faults[service] -= 1
+    """Every read takes LATENCY seconds. Injected faults make it hang or answer 500 instead."""
+    if _take(service):
         await asyncio.sleep(HANG)
     await asyncio.sleep(LATENCY)
+    if _take(f"{service}:500"):
+        raise HTTPException(500, f"{service} service error")
 
 
 # --- reads ---------------------------------------------------------------------------
@@ -88,6 +98,8 @@ async def get_order(order_id: str):
     await _slow("orders")
     if order_id not in data.ORDERS:
         raise HTTPException(404, f"no order {order_id}")
+    if _take("orders:bad"):                       # a half-migrated record: no total, lateness unknown
+        return {**data.ORDERS[order_id], "total": None, "minutes_late": "unknown"}
     return data.ORDERS[order_id]
 
 
@@ -138,6 +150,8 @@ async def get_devices(customer: str):
 @app.get("/fraud/{customer}")
 async def get_fraud(customer: str):
     await _slow("fraud")
+    if _take("fraud:bad"):                        # a score on the wrong scale
+        return {"customer": customer, "score": 86, "signals": []}
     return {"customer": customer, **data.FRAUD.get(customer, data.DEFAULT_FRAUD)}
 
 
@@ -349,6 +363,8 @@ def create_ticket(t: Ticket):
 # --- admin: fault injection and reset, for the demos --------------------------------------
 @app.post("/admin/faults")
 def set_faults(faults: dict[str, int]):
+    """{"fraud": 1} hang once · {"orders:500": 2} two 500s · {"orders:bad": 1} a broken record ·
+    {"leave_after_chunks": 2} the customer leaves mid-reply."""
     _faults.update(faults)
     return _faults
 
