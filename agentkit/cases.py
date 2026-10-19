@@ -1,7 +1,8 @@
 """Customer messages with the outcome the refund policy requires.
 
 The last two need the customer's history (stage 01): one order was already refunded, and one
-customer has claimed four refunds this month.
+customer has claimed four refunds this month. The two "grey" cases have a fraud score
+between 0.4 and 0.7, so a fraud-review sub-agent decides (stage 03).
 
 REFUND is the running example. CASES is the evaluation set stage 6 scores every design on:
 the expected action, the amount, and whether a manager must approve.
@@ -56,4 +57,10 @@ CASES = [
     {"id": "frequent-claimer", "customer": "C-2468",
      "message": "A-9990 arrived without the milkshake. Refund it please.",
      "expect": {"action": "refund", "amount": 15, "approval": True}},
+    {"id": "grey-shared-device", "customer": "C-4321",
+     "message": "A-9940 came without the baklava box. Please refund it.",
+     "expect": {"action": "refuse", "amount": 0, "approval": False}},
+    {"id": "grey-household", "customer": "C-4455",
+     "message": "The tiramisu was missing from A-9945, can I get a refund for it?",
+     "expect": {"action": "refund", "amount": 11, "approval": False}},
 ]

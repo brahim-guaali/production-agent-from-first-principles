@@ -38,6 +38,13 @@ class Platform:
     def add_note(self, customer, run_id, order_id, text):
         return self._post(f"/customers/{customer}/notes", {"run_id": run_id, "order_id": order_id, "text": text})
 
+    # what sub-agents look up
+    def search_policy(self, q):
+        return self._get("/policy/search", q=q)
+
+    def get_devices(self, customer):
+        return self._get(f"/customers/{customer}/devices")
+
     # conversations
     def add_turn(self, session_id, customer, role, text, run_id=None):
         return self._post(f"/sessions/{session_id}/turns", {"customer": customer, "role": role,

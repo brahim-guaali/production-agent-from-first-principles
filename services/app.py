@@ -96,6 +96,44 @@ async def get_policy():
     return {"version": data.POLICY_VERSION, "clauses": data.POLICY}
 
 
+def _words(text):
+    """Lower-case words of 3+ letters, crudely stemmed ("tips"/"tip", "refunded"/"refund")."""
+    out = set()
+    for w in text.lower().split():
+        w = w.strip("?.,:;!$()'\"")
+        if len(w) > 5 and w.endswith("ed"):
+            w = w[:-2]
+        elif len(w) > 3 and w.endswith("s"):
+            w = w[:-1]
+        if len(w) >= 3:
+            out.add(w)
+    return out
+
+
+@app.get("/policy/search")
+async def search_policy(q: str):
+    """Clauses and FAQ answers that share words with the question, rarer words counting more."""
+    await asyncio.sleep(LATENCY / 4)
+    docs = [(kind, key, text) for kind, items in (("clause", data.POLICY), ("faq", data.FAQ))
+            for key, text in items.items()]
+    df = {}
+    for _, _, text in docs:
+        for w in _words(text):
+            df[w] = df.get(w, 0) + 1
+    query, hits = _words(q), []
+    for kind, key, text in docs:
+        score = sum(1 / df[w] for w in query & _words(text))
+        if score:
+            hits.append({"id": key, "kind": kind, "text": text, "score": round(score, 2)})
+    return {"query": q, "results": sorted(hits, key=lambda h: -h["score"])[:5]}
+
+
+@app.get("/customers/{customer}/devices")
+async def get_devices(customer: str):
+    await _slow("devices")
+    return {"customer": customer, "devices": data.DEVICES.get(customer, [])}
+
+
 @app.get("/fraud/{customer}")
 async def get_fraud(customer: str):
     await _slow("fraud")

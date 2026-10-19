@@ -27,11 +27,33 @@ class ScriptedChat:
                                function_calls=calls, text=turn if isinstance(turn, str) else None)
 
 
-class ScriptedStructured:
-    """Answers structured() calls with a function of (schema name, prompt)."""
+def finish(**result):
+    """A sub-agent's last turn: call finish() with this result."""
+    return [("finish", result)]
 
-    def __init__(self, answer):
+
+DEFAULT_SUBAGENTS = {
+    "fraud analyst": [finish(risk="low", evidence=["scripted"])],
+    "refund policy": [finish(answer="The order total is the food items only.", sources=["F1"], covered=True)],
+}
+
+
+class ScriptedStructured:
+    """Answers structured() calls with a function of (schema name, prompt), and runs sub-agent
+    loops (chat) from scripts keyed by a phrase in the sub-agent's instructions."""
+
+    def __init__(self, answer, subagents=None):
         self.answer, self.usage = answer, Usage()
+        self.scripts = {k: list(v) for k, v in (subagents or DEFAULT_SUBAGENTS).items()}
+        self.chats = {}
+
+    def chat(self, system, contents, tools):
+        key = next(k for k in self.scripts if k in system)
+        if key not in self.chats or len(contents) == 1:          # a new hand-off restarts its script
+            self.chats[key] = ScriptedChat(self.scripts[key])
+        response = self.chats[key].chat(system, contents, tools)
+        self.usage.calls += 1
+        return response
 
     def structured(self, system, prompt, schema):
         self.usage.calls += 1

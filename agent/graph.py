@@ -6,6 +6,8 @@ idempotency key) -> reply, which leaves a note in the customer's history for the
 A follow-up in a conversation ("why only $72?") goes to `explain`, which answers from the
 session and the notes, or hands the customer to a person. Every run belongs to a session
 (stage 02): the customer's message and the agent's reply are stored as turns.
+Two sub-agents (stage 03): a grey-zone fraud score (0.4 to 0.7) is handed to `fraud_review`,
+and `explain` asks `policy_expert` before answering. Each hand-off is recorded in `handoffs`.
 Messages that aren't refund requests go to `support`, a small agent loop inside one node.
 State is checkpointed in SQLite, so a run can pause for the manager and resume in another
 process.
@@ -22,6 +24,7 @@ from langgraph.types import RetryPolicy, interrupt
 
 from agentkit import judgments
 from agentkit.trace import NullTracer
+from agent.subagents import FRAUD_REVIEW, POLICY_EXPERT
 from agent.support import support_agent
 from agent.verify import check
 
@@ -41,6 +44,8 @@ class RefundState(TypedDict, total=False):
     policy: dict
     fraud: dict
     history: dict
+    fraud_review: dict
+    handoffs: Annotated[list, operator.add]     # every call to a sub-agent, in order
     evidence: Annotated[list, operator.add]     # three parallel writers: append
     spent: Annotated[float, operator.add]       # every model call adds its cost
     attempts: Annotated[int, operator.add]
@@ -99,13 +104,17 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
     def explain(s, config):
         r = s["request"]
         notes = platform.get_history(r["customer"])["notes"]
+        handoff, cost1 = charged(lambda: POLICY_EXPERT.run(
+            llm, platform, f"A customer asks: {r['message']!r}. Earlier in the conversation: "
+            + " | ".join(f"{t['role']}: {t['text']}" for t in s["session"]["turns"][-4:]), "explain", tracer))
         e, cost = charged(lambda: judgments.explain(llm, r["message"], s["session"]["turns"], notes,
-                                                    platform.get_policy()))
+                                                    platform.get_policy(), handoff["result"]))
+        cost += cost1
         reply = say(s, config, e.answer) | {"explanation": e.model_dump()}
         if e.wants_person:
             reply["ticket"] = platform.create_ticket(r["customer"], "other", "normal",
                                                      f"Disputes an earlier decision: {r['message'][:120]}")
-        return {"reply": reply, "spent": cost}
+        return {"reply": reply, "spent": cost, "handoffs": [handoff]}
 
     def order(s, config):
         o = platform.get_order(s["claim"]["order_id"])
@@ -124,17 +133,28 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         return {"history": h, "evidence": [f"history: {h['refunds_30d']} refunds in 30 days, "
                                            f"{len(h['notes'])} notes"]}
 
+    def screen(s, config):
+        return {}                                   # code only: the route below decides
+
+    def fraud_review(s, config):
+        r, f = s["request"], s["fraud"]
+        task = (f"Customer {r['customer']} asks for a refund on order {s['claim']['order_id']}. "
+                f"Fraud score {f['score']}, signals: {', '.join(f['signals'])}. Review and give a verdict.")
+        handoff, cost = charged(lambda: FRAUD_REVIEW.run(llm, platform, task, "refund_agent", tracer))
+        return {"fraud_review": handoff["result"] or {"risk": "high", "evidence": ["review did not finish"]},
+                "handoffs": [handoff], "spent": cost}
+
     def decide(s, config):
         feedback = "; ".join(s.get("problems") or []) or None
         claim = judgments.Classification(**s["claim"])
         d, cost = charged(lambda: judgments.decide(llm, s["request"]["message"], claim, s["order"],
                                                    s["policy"], s["fraud"], feedback,
-                                                   s.get("history")))
+                                                   s.get("history"), s.get("fraud_review")))
         return {"decision": d.model_dump(), "spent": cost, "attempts": 1}
 
     def verify(s, config):
         return {"problems": check(judgments.Decision(**s["decision"]), s["order"], s["policy"], s["fraud"],
-                                  s.get("history"))}
+                                  s.get("history"), s.get("fraud_review"))}
 
     def ask_manager(s, config):
         d = s["decision"]
@@ -175,7 +195,8 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
     lookups = RetryPolicy(max_attempts=3, initial_interval=0.5,
                           retry_on=(httpx.TimeoutException, httpx.ConnectError))
     g = StateGraph(RefundState)
-    for name, fn in [("session", session), ("classify", classify), ("explain", explain), ("decide", decide), ("verify", verify),
+    for name, fn in [("session", session), ("classify", classify), ("explain", explain), ("screen", screen),
+                     ("fraud_review", fraud_review), ("decide", decide), ("verify", verify),
                      ("ask_manager", ask_manager), ("approval", approval), ("refund", refund),
                      ("reply", reply), ("support", support), ("escalate", escalate)]:
         g.add_node(name, traced(name, fn))
@@ -185,7 +206,10 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
     g.add_edge(START, "session")
     g.add_edge("session", "classify")
     g.add_conditional_edges("classify", route_after_classify, LOOKUPS + ["explain", "support"])
-    g.add_edge(LOOKUPS, "decide")
+    g.add_edge(LOOKUPS, "screen")
+    g.add_conditional_edges("screen", lambda s: "fraud_review" if grey_zone(s["fraud"]) else "decide",
+                            ["fraud_review", "decide"])
+    g.add_edge("fraud_review", "decide")
     g.add_edge("decide", "verify")
     g.add_conditional_edges("verify", route_after_verify,
                             ["decide", "escalate", "ask_manager", "refund", "reply"])
@@ -198,6 +222,11 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
 
     db.parent.mkdir(parents=True, exist_ok=True)
     return g.compile(checkpointer=SqliteSaver(sqlite3.connect(db, check_same_thread=False)))
+
+
+def grey_zone(fraud):
+    """§9: neither clearly fine nor clearly fraud, so the fraud-review sub-agent decides."""
+    return 0.4 <= fraud["score"] <= 0.7
 
 
 def route_after_classify(s):
@@ -230,7 +259,8 @@ def spec(graph):
     """Nodes and edges for the live viewer, read from LangGraph's own description of the graph."""
     drawable = graph.get_graph()
     nodes = [n for n in drawable.nodes if not n.startswith("__")]
-    kinds = {"session": "http · memory", "explain": "model", "classify": "model", "decide": "model", "support": "model · loop inside",
+    kinds = {"session": "http · memory", "explain": "model · calls policy_expert", "classify": "model",
+             "screen": "code", "fraud_review": "sub-agent", "decide": "model", "support": "model · loop inside",
              "approval": "person", "refund": "http · money", "order": "http", "policy": "http",
              "fraud": "http", "history": "http · memory", "ask_manager": "http", "reply": "http"}
     edges = [{"from": e.source, "to": e.target, "cond": e.conditional}
