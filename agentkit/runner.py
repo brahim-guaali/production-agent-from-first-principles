@@ -46,6 +46,8 @@ def outcome(run):
     d = s.get("decision") or {}
     if s.get("reply", {}).get("ticket") and not d:
         action = "handoff"
+    elif s.get("payment", {}).get("replayed"):
+        action = "refuse"                 # a duplicate: no money moved, the customer is told so
     elif s.get("reply", {}).get("queue") == "support-escalations":
         action = "refuse" if s.get("fraud_review", {}).get("risk") == "high" else "escalate"
     else:

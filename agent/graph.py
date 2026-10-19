@@ -116,6 +116,8 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
 
     def classify(s, config):
         claim, cost = charged(lambda: judgments.classify(llm, s["request"]["message"], s["session"]["turns"]))
+        if claim.order_id:                           # customers type "a-9310" too (stage 07)
+            claim.order_id = claim.order_id.strip().upper()
         return {"claim": claim.model_dump(), "spent": cost}
 
     def explain(s, config):
@@ -198,7 +200,9 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         return {"approval": answer}
 
     def refund(s, config):
-        key = f"{config['configurable']['thread_id']}:refund"          # idempotency: run + node
+        # One refund per order (stage 07): two runs for the same order at the same moment both
+        # read a history with no refund in it; a key per run would let both pay.
+        key = f"{s['order']['order_id']}:refund"
         return {"payment": platform.pay(s["order"]["order_id"], s["decision"]["amount"], idempotency_key=key)}
 
     def stream_reply(s, config):
@@ -213,12 +217,17 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         d, spent, streamed = s["decision"], 0.0, None
         if s.get("approval") == "rejected":
             text = "We reviewed your request and can't refund this order. A colleague will follow up."
+        elif s.get("payment", {}).get("replayed"):
+            text = ("This order has already been refunded, so there's nothing more to send. "
+                    "The refund reaches your card in 5 to 10 working days.")
         else:
             streamed, spent = stream_reply(s, config)
             text = streamed["text"] or d["customer_message"]
         note = f"{d['action']} ${d['amount']:g} under {d['clause']}: {d['reason']}"
         if s.get("approval") == "rejected":
             note = f"manager rejected a ${d['amount']:g} refund"
+        if s.get("payment", {}).get("replayed"):
+            note = f"duplicate request: order already refunded (${d['amount']:g}), no second payment"
         if streamed and streamed["aborted"]:
             note += " (the customer left before the reply finished)"
         if any(e["verdict"] == "flagged" for e in s.get("guardrails", [])):

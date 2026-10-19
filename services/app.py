@@ -369,6 +369,31 @@ def set_faults(faults: dict[str, int]):
     return _faults
 
 
+class Clone(BaseModel):
+    order_id: str
+    new_order_id: str
+    new_customer: str
+
+
+@app.post("/admin/clone")
+def clone(c: Clone):
+    """Traffic (stage 07): a copy of a seeded order for a new customer, with the original
+    customer's fraud score, devices and past refunds, so every replayed run starts clean."""
+    base = data.ORDERS[c.order_id]
+    old = base["customer"]
+    data.ORDERS[c.new_order_id] = {**base, "order_id": c.new_order_id, "customer": c.new_customer}
+    if old in data.FRAUD:
+        data.FRAUD[c.new_customer] = data.FRAUD[old]
+    if old in data.DEVICES:
+        data.DEVICES[c.new_customer] = data.DEVICES[old]
+    if old in data.HISTORY:                      # a past refund on this order follows it to the copy
+        h = data.HISTORY[old]
+        data.HISTORY[c.new_customer] = {**h, "refunds": [
+            {**r, "order_id": c.new_order_id if r["order_id"] == c.order_id else r["order_id"]}
+            for r in h["refunds"]]}
+    return {"order_id": c.new_order_id, "customer": c.new_customer}
+
+
 @app.post("/admin/reset")
 def reset():
     _faults.clear()

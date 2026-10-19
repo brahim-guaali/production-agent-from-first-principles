@@ -16,7 +16,7 @@ def test_the_agent_pauses_for_the_manager_resumes_and_pays_once(platform, tmp_pa
     kinds = {e.split()[0].rstrip(":") for e in state["evidence"]}    # parallel writers, one reducer
     assert {"order", "policy", "fraud"} <= kinds
     payments = Platform(platform).payments("A-7731")
-    assert payments["count"] == 1 and payments["payments"][0]["idempotency_key"] == "t1:refund"
+    assert payments["count"] == 1 and payments["payments"][0]["idempotency_key"] == "A-7731:refund"
 
 
 def test_a_retried_lookup_absorbs_a_hang(platform, tmp_path):

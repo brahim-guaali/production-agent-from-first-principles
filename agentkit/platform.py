@@ -97,6 +97,10 @@ class Platform:
     def inject_faults(self, **faults):     # e.g. fraud=1 (hang), leave_after_chunks=2
         return self._post("/admin/faults", faults)
 
+    def clone(self, order_id, new_order_id, new_customer):
+        return self._post("/admin/clone", {"order_id": order_id, "new_order_id": new_order_id,
+                                           "new_customer": new_customer})
+
     def reset(self):
         return self._post("/admin/reset")
 
