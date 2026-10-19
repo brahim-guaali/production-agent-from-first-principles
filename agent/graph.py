@@ -3,6 +3,8 @@
 classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
 if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an
 idempotency key) -> reply, which leaves a note in the customer's history for the next run.
+Every message passes an input guardrail (prompt injection), and the streamed reply an
+output check (amount, currency) with a correction if it fails (stage 06).
 Lookups retry transient errors and validate what they get; a lookup that still fails is
 recorded in `failures` and the run escalates with a reply that says what went wrong
 (stage 05). The refund reply is streamed to the customer's chat as it's written (stage 04).
@@ -27,6 +29,7 @@ from pydantic import ValidationError
 
 from agentkit import judgments
 from agentkit.trace import NullTracer
+from agent import guardrails as gr
 from agent import lookups as lk
 from agent.subagents import FRAUD_REVIEW, POLICY_EXPERT
 from agent.support import support_agent
@@ -51,6 +54,7 @@ class RefundState(TypedDict, total=False):
     fraud_review: dict
     handoffs: Annotated[list, operator.add]     # every call to a sub-agent, in order
     failures: Annotated[list, operator.add]     # lookups that failed after retries (stage 05)
+    guardrails: Annotated[list, operator.add]   # input and output checks, pass or flagged (stage 06)
     evidence: Annotated[list, operator.add]     # three parallel writers: append
     spent: Annotated[float, operator.add]       # every model call adds its cost
     attempts: Annotated[int, operator.add]
@@ -101,6 +105,14 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         before = platform.get_session(session_of(s, config))
         platform.add_turn(session_of(s, config), r["customer"], "customer", r["message"], run_id(config))
         return {"session": before, "evidence": [f"session: {len(before['turns'])} earlier turns"]}
+
+    def guard(s, config):
+        before = llm.usage.cost
+        events, used_model = gr.check_input(llm, s["request"]["message"])
+        flagged = [e for e in events if e["verdict"] == "flagged"]
+        if flagged:
+            tracer.log(f"guardrail: prompt injection flagged by {flagged[0]['by']}: {flagged[0]['evidence']}")
+        return {"guardrails": events, "spent": llm.usage.cost - before}
 
     def classify(s, config):
         claim, cost = charged(lambda: judgments.classify(llm, s["request"]["message"], s["session"]["turns"]))
@@ -209,11 +221,18 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
             note = f"manager rejected a ${d['amount']:g} refund"
         if streamed and streamed["aborted"]:
             note += " (the customer left before the reply finished)"
+        if any(e["verdict"] == "flagged" for e in s.get("guardrails", [])):
+            note += " (prompt injection attempt flagged)"
         platform.add_note(s["request"]["customer"], run_id(config), s["order"]["order_id"], note)
         out = say(s, config, text)
+        checks = []
         if streamed:
             out["stream"] = {k: streamed[k] for k in ("ttft", "seconds", "chunks", "aborted", "model")}
-        return {"reply": out, "spent": spent}
+            checks = gr.check_output(text, d)              # after sending: a stream can't be unsent
+            if any(c["verdict"] == "flagged" for c in checks):
+                out["correction"] = say(s, config, gr.correction(d))["text"]
+                tracer.log(f"guardrail: reply corrected: {[c['evidence'] for c in checks]}")
+        return {"reply": out, "spent": spent, "guardrails": checks}
 
     def support(s, config):
         # The hybrid: open-ended work, so a small agent loop runs *inside* this one node.
@@ -232,7 +251,7 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         return {"reply": say(s, config, text) | {"queue": "support-escalations", "why": why}}
 
     g = StateGraph(RefundState)
-    for name, fn in [("session", session), ("classify", classify), ("explain", explain), ("screen", screen),
+    for name, fn in [("session", session), ("guard", guard), ("classify", classify), ("explain", explain), ("screen", screen),
                      ("fraud_review", fraud_review), ("decide", decide), ("verify", verify),
                      ("ask_manager", ask_manager), ("approval", approval), ("refund", refund),
                      ("reply", reply), ("support", support), ("escalate", escalate)]:
@@ -241,7 +260,8 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         g.add_node(name, traced(name, fn))           # retries live in lookups.fetch (stage 05)
 
     g.add_edge(START, "session")
-    g.add_edge("session", "classify")
+    g.add_edge("session", "guard")
+    g.add_edge("guard", "classify")
     g.add_conditional_edges("classify", route_after_classify, LOOKUPS + ["explain", "support"])
     g.add_edge(LOOKUPS, "screen")
     g.add_conditional_edges("screen", route_after_lookups, ["escalate", "fraud_review", "decide"])
@@ -301,7 +321,7 @@ def spec(graph):
     """Nodes and edges for the live viewer, read from LangGraph's own description of the graph."""
     drawable = graph.get_graph()
     nodes = [n for n in drawable.nodes if not n.startswith("__")]
-    kinds = {"session": "http · memory", "explain": "model · calls policy_expert", "classify": "model",
+    kinds = {"session": "http · memory", "guard": "guardrail · rules, model if unsure", "explain": "model · calls policy_expert", "classify": "model",
              "screen": "code", "fraud_review": "sub-agent", "decide": "model", "support": "model · loop inside",
              "approval": "person", "refund": "http · money", "order": "http", "policy": "http",
              "fraud": "http", "history": "http · memory", "ask_manager": "http", "reply": "http"}

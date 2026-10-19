@@ -5,6 +5,8 @@ def answers(kind="refund_request", order_id="A-7731", action="refund", amount=64
     def answer(schema, prompt):
         if schema == "Classification":
             return {"kind": kind, "order_id": order_id, "items_claimed": []}
+        if schema == "InjectionCheck":
+            return {"injection": "pretend" in prompt, "evidence": "pretend" if "pretend" in prompt else ""}
         return {"action": action, "amount": amount, "clause": clause,
                 "reason": "late", "customer_message": "Your refund is on its way."}
     return answer
