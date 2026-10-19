@@ -50,6 +50,17 @@ class Platform:
         return self._post(f"/sessions/{session_id}/turns", {"customer": customer, "role": role,
                                                              "text": text, "run_id": run_id})
 
+    def push_chunk(self, session_id, run_id, seq, text):
+        """False when the customer has closed the chat (409)."""
+        r = self.http.post(f"/chat/{session_id}/chunks", json={"run_id": run_id, "seq": seq, "text": text})
+        if r.status_code == 409:
+            return False
+        r.raise_for_status()
+        return True
+
+    def get_chat(self, session_id):
+        return self._get(f"/chat/{session_id}")
+
     def get_session(self, session_id):
         return self._get(f"/sessions/{session_id}")
 
@@ -83,7 +94,7 @@ class Platform:
                                        "priority": priority, "summary": summary})
 
     # demo controls
-    def inject_faults(self, **faults):
+    def inject_faults(self, **faults):     # e.g. fraud=1 (hang), leave_after_chunks=2
         return self._post("/admin/faults", faults)
 
     def reset(self):

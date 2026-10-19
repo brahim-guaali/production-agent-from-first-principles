@@ -3,6 +3,7 @@
 classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
 if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an
 idempotency key) -> reply, which leaves a note in the customer's history for the next run.
+The refund reply is streamed to the customer's chat as it's written (stage 04).
 A follow-up in a conversation ("why only $72?") goes to `explain`, which answers from the
 session and the notes, or hands the customer to a person. Every run belongs to a session
 (stage 02): the customer's message and the agent's reply are stored as turns.
@@ -170,16 +171,31 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         key = f"{config['configurable']['thread_id']}:refund"          # idempotency: run + node
         return {"payment": platform.pay(s["order"]["order_id"], s["decision"]["amount"], idempotency_key=key)}
 
+    def stream_reply(s, config):
+        """Stage 04: write the reply while the customer watches it appear."""
+        sid, seq = session_of(s, config), iter(range(10_000))
+        before = llm.usage.cost
+        out = judgments.compose(llm, s["request"]["message"], s["decision"],
+                                lambda piece: platform.push_chunk(sid, run_id(config), next(seq), piece))
+        return out, llm.usage.cost - before
+
     def reply(s, config):
-        text = s["decision"]["customer_message"]
+        d, spent, streamed = s["decision"], 0.0, None
         if s.get("approval") == "rejected":
             text = "We reviewed your request and can't refund this order. A colleague will follow up."
-        d = s["decision"]
+        else:
+            streamed, spent = stream_reply(s, config)
+            text = streamed["text"] or d["customer_message"]
         note = f"{d['action']} ${d['amount']:g} under {d['clause']}: {d['reason']}"
         if s.get("approval") == "rejected":
             note = f"manager rejected a ${d['amount']:g} refund"
+        if streamed and streamed["aborted"]:
+            note += " (the customer left before the reply finished)"
         platform.add_note(s["request"]["customer"], run_id(config), s["order"]["order_id"], note)
-        return {"reply": say(s, config, text)}
+        out = say(s, config, text)
+        if streamed:
+            out["stream"] = {k: streamed[k] for k in ("ttft", "seconds", "chunks", "aborted", "model")}
+        return {"reply": out, "spent": spent}
 
     def support(s, config):
         # The hybrid: open-ended work, so a small agent loop runs *inside* this one node.

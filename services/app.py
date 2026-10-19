@@ -33,6 +33,7 @@ DB_PATH = Path(os.environ.get("PLATFORM_DB", Path(__file__).resolve().parents[1]
 app = FastAPI(title="Food-delivery platform (demo)")
 _lock = threading.Lock()
 _faults: dict[str, int] = {}
+_chats: dict[str, dict] = {}       # session -> the reply being streamed to the customer's app
 
 
 @contextmanager
@@ -204,6 +205,43 @@ def get_session(session_id: str):
     return {"session_id": session_id, "turns": turns}
 
 
+class Chunk(BaseModel):
+    run_id: str
+    seq: int
+    text: str
+
+
+@app.post("/chat/{session_id}/chunks")
+def push_chunk(session_id: str, c: Chunk):
+    """The agent streams its reply here, piece by piece. A customer who left gets 409 back,
+    which tells the agent to stop. Fault `leave_after_chunks: n`: the next reply's customer
+    closes the app after n pieces."""
+    with _lock:
+        chat = _chats.get(session_id)
+        if chat is None or chat["run_id"] != c.run_id:
+            chat = _chats[session_id] = {"run_id": c.run_id, "chunks": [], "closed": False,
+                                         "leave_after": _faults.pop("leave_after_chunks", None)}
+        if chat["closed"]:
+            raise HTTPException(409, "the customer closed the chat")
+        chat["chunks"].append(c.text)
+        if chat["leave_after"] is not None and len(chat["chunks"]) >= chat["leave_after"]:
+            chat["closed"] = True
+    return {"received": len(chat["chunks"])}
+
+
+@app.post("/chat/{session_id}/close")
+def close_chat(session_id: str):
+    with _lock:
+        _chats.setdefault(session_id, {"run_id": None, "chunks": [], "closed": True})["closed"] = True
+    return {"ok": True}
+
+
+@app.get("/chat/{session_id}")
+def get_chat(session_id: str):
+    chat = _chats.get(session_id, {"chunks": [], "closed": False})
+    return {"text": "".join(chat["chunks"]), "chunks": len(chat["chunks"]), "closed": chat["closed"]}
+
+
 # --- writes: approvals (a person), payments (money), notifications ---------------------
 class ApprovalRequest(BaseModel):
     run_id: str
@@ -318,6 +356,7 @@ def set_faults(faults: dict[str, int]):
 @app.post("/admin/reset")
 def reset():
     _faults.clear()
+    _chats.clear()
     with _lock, db() as conn:
         conn.executescript("delete from payments; delete from approvals; delete from notifications; "
                            "delete from tickets; delete from notes; delete from turns;")

@@ -47,6 +47,19 @@ class ScriptedStructured:
         self.scripts = {k: list(v) for k, v in (subagents or DEFAULT_SUBAGENTS).items()}
         self.chats = {}
 
+    REPLY = ["We're sorry ", "your order was late. ", "Your refund is on its way ", "and should arrive in 5 to 10 days."]
+
+    def stream(self, system, prompt, on_chunk):
+        """Streams REPLY piece by piece; stops when on_chunk returns False (the customer left)."""
+        self.usage.calls += 1
+        text, chunks = "", 0
+        for piece in self.REPLY:
+            text, chunks = text + piece, chunks + 1
+            if on_chunk(piece) is False:
+                return {"text": text, "ttft": 0.01, "seconds": 0.02, "chunks": chunks, "aborted": True,
+                        "model": "scripted"}
+        return {"text": text, "ttft": 0.01, "seconds": 0.02, "chunks": chunks, "aborted": False, "model": "scripted"}
+
     def chat(self, system, contents, tools):
         key = next(k for k in self.scripts if k in system)
         if key not in self.chats or len(contents) == 1:          # a new hand-off restarts its script

@@ -111,6 +111,50 @@ class Gemini:
         )
         return self._generate(contents, config)
 
+    def stream(self, system, prompt, on_chunk):
+        """Stream a text answer (stage 04). on_chunk(text) is called for every piece as it
+        arrives; if it returns False the customer is gone, so we stop generating. Returns the
+        text, time to first token, total time, number of chunks and whether it was cut off."""
+        config = types.GenerateContentConfig(system_instruction=system, temperature=0.3)
+        last = None
+        for attempt in range(4):
+            model = self.models[min(attempt // 2, len(self.models) - 1)]
+            _limiter.wait()
+            t0, text, chunks, ttft, final = time.monotonic(), "", 0, None, None
+            try:
+                stream = self.client.models.generate_content_stream(model=model, contents=prompt, config=config)
+                for response in stream:
+                    piece = response.text or ""
+                    final = response
+                    if not piece:
+                        continue
+                    if ttft is None:
+                        ttft = time.monotonic() - t0
+                    text, chunks = text + piece, chunks + 1
+                    if on_chunk(piece) is False:
+                        stream.close()                      # stop paying for words nobody reads
+                        break
+                else:
+                    pass
+            except (errors.ServerError, errors.ClientError) as e:
+                if chunks:                                   # failed mid-stream: keep what was said
+                    raise
+                if getattr(e, "code", None) not in (429, 500, 503) and isinstance(e, errors.ClientError):
+                    raise
+                last = e
+                time.sleep(min(30, 2 ** attempt * 2))
+                continue
+            aborted = final is None or not (final.candidates and final.candidates[0].finish_reason)
+            if final is not None and final.usage_metadata:
+                self.usage.add(final, time.monotonic() - t0, model)
+            else:
+                with self.usage._lock:
+                    self.usage.calls += 1
+                    self.usage.models[model] = self.usage.models.get(model, 0) + 1
+            return {"text": text, "ttft": ttft, "seconds": time.monotonic() - t0, "chunks": chunks,
+                    "aborted": aborted, "model": model}
+        raise RuntimeError(f"Gemini kept failing: {last}")
+
     def structured(self, system, prompt, schema):
         """For a graph node: one narrow question in, one typed answer (a pydantic model) out."""
         config = types.GenerateContentConfig(
