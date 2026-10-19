@@ -32,6 +32,7 @@ from agentkit.trace import NullTracer
 from agent import guardrails as gr
 from agent import lookups as lk
 from agent.subagents import FRAUD_REVIEW, POLICY_EXPERT
+from agent.versions import run_meta
 from agent.support import support_agent
 from agent.verify import check
 
@@ -44,6 +45,7 @@ DB = Path(__file__).resolve().parents[1] / "var" / "langgraph.db"
 
 class RefundState(TypedDict, total=False):
     request: dict
+    meta: dict                                  # prompt set, agent commit, environment (stage 08)
     session: dict
     budget: Optional[float]
     claim: dict
@@ -104,7 +106,8 @@ def build(llm, platform, tracer=NullTracer(), db=DB):
         r = s["request"]
         before = platform.get_session(session_of(s, config))
         platform.add_turn(session_of(s, config), r["customer"], "customer", r["message"], run_id(config))
-        return {"session": before, "evidence": [f"session: {len(before['turns'])} earlier turns"]}
+        return {"session": before, "evidence": [f"session: {len(before['turns'])} earlier turns"],
+                "meta": s.get("meta") or run_meta()}
 
     def guard(s, config):
         before = llm.usage.cost

@@ -38,6 +38,14 @@ class Platform:
     def add_note(self, customer, run_id, order_id, text):
         return self._post(f"/customers/{customer}/notes", {"run_id": run_id, "order_id": order_id, "text": text})
 
+    # outside signals (stage 08)
+    def rate(self, run_id, customer, rating, comment="", session_id=None):
+        return self._post("/feedback", {"run_id": run_id, "customer": customer, "rating": rating,
+                                        "comment": comment, "session_id": session_id})
+
+    def feedback(self, run_id=None):
+        return self._get("/feedback", **({"run_id": run_id} if run_id else {}))
+
     # what sub-agents look up
     def search_policy(self, q):
         return self._get("/policy/search", q=q)

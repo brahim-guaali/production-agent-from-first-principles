@@ -14,7 +14,7 @@ from agentkit.llm import Gemini
 from agentkit.trace import Tracer
 
 
-def run_case(case, platform, stage, title=None, manager="approved", prefix="r", llm=None):
+def run_case(case, platform, stage, title=None, manager="approved", prefix="r", llm=None, meta=None):
     llm = llm or Gemini()
     thread = f"{prefix}-" + uuid.uuid4().hex[:6]
     tracer = Tracer(stage, title or case.get("id", "run"), usage=llm.usage, run_id=thread)
@@ -22,7 +22,7 @@ def run_case(case, platform, stage, title=None, manager="approved", prefix="r", 
     tracer.start(spec(graph))
     config = {"configurable": {"thread_id": thread}}
     t0 = time.monotonic()
-    state = graph.invoke({"request": case}, config)
+    state = graph.invoke({"request": case, **({"meta": meta} if meta else {})}, config)
     asked = bool(graph.get_state(config).next)
     if asked:
         platform.decide_approval(state["approval_request"]["id"], manager)

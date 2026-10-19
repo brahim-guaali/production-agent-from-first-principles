@@ -20,6 +20,8 @@ import time
 import uuid
 from pathlib import Path
 
+from agent.versions import run_meta
+from agentkit import customers
 from agentkit.cases import CASES
 from agentkit.runner import outcome, run_case, summary
 
@@ -82,8 +84,8 @@ def plan(total, seed=7, repeat_rate=0.08, weights=None):
 
 class Replayer:
     def __init__(self, platform, stage, log_path, workers=3, rate_per_min=6.0, seed=7, fault_rate=0.0,
-                 llm_factory=None):
-        self.llm_factory = llm_factory
+                 llm_factory=None, ratings=False, environment=None):
+        self.llm_factory, self.ratings, self.environment = llm_factory, ratings, environment
         self.platform, self.stage, self.log_path = platform, stage, Path(log_path)
         self.workers, self.rate, self.rng, self.fault_rate = workers, rate_per_min, random.Random(seed), fault_rate
         self.q, self.lock, self.done = queue.Queue(), threading.Lock(), []
@@ -110,7 +112,8 @@ class Replayer:
                     record["fault_injected"] = fault
                 r = run_case({"customer": req["customer"], "message": req["message"]}, self.platform,
                              self.stage, title=req["id"], prefix="t",
-                             llm=self.llm_factory(req) if self.llm_factory else None)
+                             llm=self.llm_factory(req) if self.llm_factory else None,
+                             meta=run_meta(self.environment) if self.environment else None)
                 s, u = r["state"], r["usage"]
                 ins = [e for e in s.get("guardrails", []) if e["stage"] == "input"]
                 got = outcome(r)
@@ -122,7 +125,13 @@ class Replayer:
                     failures=s.get("failures", []), handoffs=len(s.get("handoffs", [])),
                     calls=u.calls, models=u.models, input_tokens=u.input_tokens, output_tokens=u.output_tokens,
                     cost=round(u.cost, 6), events=u.events,
-                    ttft=(s.get("reply", {}).get("stream") or {}).get("ttft"))
+                    ttft=(s.get("reply", {}).get("stream") or {}).get("ttft"),
+                    meta=s.get("meta"), model_versions=sorted(u.versions))
+                if self.ratings:
+                    rated = customers.rate(record)
+                    if rated:
+                        self.platform.rate(r["run_id"], req["customer"], *rated)
+                        record["rating"], record["comment"] = rated
             except Exception as e:                       # a crash is a data point too
                 record.update(seconds=round(time.time() - started, 2), crashed=f"{type(e).__name__}: {e}"[:300],
                               correct=False)

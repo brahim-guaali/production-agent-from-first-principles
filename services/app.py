@@ -54,6 +54,9 @@ def db():
         create table if not exists turns (
             id integer primary key autoincrement, session_id text, customer text, role text,
             text text, run_id text, created_at text);
+        create table if not exists feedback (
+            id text primary key, run_id text, session_id text, customer text, rating integer,
+            comment text, created_at text);
         create table if not exists notes (
             id text primary key, customer text, run_id text, order_id text, text text, created_at text);
         create table if not exists tickets (
@@ -178,6 +181,33 @@ async def get_history(customer: str):
     return {"customer": customer, "orders_90d": seed["orders_90d"], "refunds": refunds,
             "refunds_30d": sum(1 for r in refunds if r["at"] >= cutoff),
             "refunded_orders": sorted({r["order_id"] for r in refunds}), "notes": notes}
+
+
+class Feedback(BaseModel):
+    run_id: str
+    session_id: str | None = None
+    customer: str
+    rating: int              # 1 to 5 stars
+    comment: str = ""
+
+
+@app.post("/feedback")
+def add_feedback(f: Feedback):
+    """The customer's rating of a reply (stage 08), kept with the run that wrote it."""
+    if not 1 <= f.rating <= 5:
+        raise HTTPException(422, "rating must be 1 to 5")
+    fid = "fb_" + uuid.uuid4().hex[:8]
+    with _lock, db() as conn:
+        conn.execute("insert into feedback values (?,?,?,?,?,?,?)",
+                     (fid, f.run_id, f.session_id, f.customer, f.rating, f.comment, now()))
+    return {"id": fid}
+
+
+@app.get("/feedback")
+def list_feedback(run_id: str | None = None):
+    with db() as conn:
+        q, args = ("select * from feedback where run_id = ?", (run_id,)) if run_id else ("select * from feedback", ())
+        return [dict(r) for r in conn.execute(q, args)]
 
 
 class Note(BaseModel):
@@ -400,7 +430,7 @@ def reset():
     _chats.clear()
     with _lock, db() as conn:
         conn.executescript("delete from payments; delete from approvals; delete from notifications; "
-                           "delete from tickets; delete from notes; delete from turns;")
+                           "delete from tickets; delete from notes; delete from turns; delete from feedback;")
     return {"ok": True}
 
 

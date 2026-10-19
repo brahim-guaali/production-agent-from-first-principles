@@ -27,6 +27,7 @@ class Usage:
     seconds: float = 0.0
     models: dict = field(default_factory=dict)        # which model answered, and how often
     events: list = field(default_factory=list)        # 429s, server errors, fallbacks (stage 05)
+    versions: set = field(default_factory=set)        # model versions Gemini reported (stage 08)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, response, seconds, model=None):
@@ -35,6 +36,8 @@ class Usage:
             self.calls += 1
             if model:
                 self.models[model] = self.models.get(model, 0) + 1
+            if getattr(response, "model_version", None):
+                self.versions.add(response.model_version)
             self.input_tokens += u.prompt_token_count or 0
             self.output_tokens += (u.candidates_token_count or 0) + (u.thoughts_token_count or 0)
             self.seconds += seconds
