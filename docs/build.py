@@ -11,9 +11,9 @@ HERE = Path(__file__).resolve().parent
 text = (HERE / "article.md").read_text()
 title = text.splitlines()[0].lstrip("# ").strip()
 body = markdown.markdown(text.split("\n", 1)[1], extensions=["fenced_code"]).replace("<hr />", "")
-desc = ("A refund agent for a food-delivery app, from a black box to fully observable and evaluated: "
-        "traces, cost, sampling, alerts, an LLM judge and a release gate, all from real runs.")
-og = "https://raw.githubusercontent.com/brahim-guaali/agent-observability-from-first-principles/main/viz/og.png"
+desc = ("Part 2 of Building an AI agent from first principles: a refund agent meets memory, conversations, "
+        "sub-agents, streaming, failures, guardrails, real traffic and customer ratings, with real runs.")
+og = "https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/model-switch.png"
 page = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -46,7 +46,7 @@ page = f"""<!doctype html>
 <body>
 <article>
 <h1>{html.escape(title)}</h1>
-<div class="by">Brahim Guaali · <a href="https://github.com/brahim-guaali/agent-observability-from-first-principles">code on GitHub</a></div>
+<div class="by">Brahim Guaali · <a href="https://github.com/brahim-guaali/production-agent-from-first-principles">code on GitHub</a></div>
 {body}
 </article>
 </body>
