@@ -30,6 +30,10 @@ python 00-baseline/run.py                   # terminal 2: happy | twice | suppor
 | Same $72 request on two days | **Refunded twice: $144 for a $72 order** |
 | Rude rider complaint | Support loop filed a rider ticket and replied |
 
+![Paid twice](paid-twice.png)
+
+*The real terminal output of scene 2 ([`output.txt`](output.txt)), rendered with [`viz/terminal.py`](../viz/terminal.py): two runs, two idempotency keys, two payments.*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks

@@ -45,6 +45,10 @@ The trace events showed each model call taking about 20 s and each lookup 2 s. A
 
 From here on, the Gemini client records which model answered every call (`Usage.models`), and the stages run on Flash-Lite first (`GEMINI_MODEL`). In part 2 this becomes a span attribute (`gen_ai.response.model`) and a fallback event, so a silent switch like this shows up on a dashboard instead of in a probe.
 
+![The same request without and with memory](before-after-memory.png)
+
+*Stage 00's and stage 01's real output for the same $72 request on two days ([`../00-baseline/output.txt`](../00-baseline/output.txt), [`output.txt`](output.txt)), rendered with [`viz/terminal.py`](../viz/terminal.py).*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks

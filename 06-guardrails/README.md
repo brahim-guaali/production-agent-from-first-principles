@@ -51,6 +51,10 @@ The Arabic reply said **ريال (riyal)** again, for a $55 refund. The output c
 
 The case runs took 16–47 s with **zero** model events (no 429s, no 503s). The four scene-1 runs a few minutes earlier took 63–93 s for the same kind of work. Same code, same model, three times slower, and still nothing in the output explains it.
 
+![The riyal reply and its correction](riyal.png)
+
+*The arabic-late case in two real runs: stage 04's streamed reply ([`../04-streaming/output.txt`](../04-streaming/output.txt)) and stage 06's output check and correction ([`output.txt`](output.txt)), laid out as the customer's chat in HTML and captured with headless Chrome ([`viz/screenshot.js`](../viz/screenshot.js)). The English lines are translations.*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks

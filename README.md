@@ -8,6 +8,10 @@
 
 A course in runnable code. A refund agent for a food-delivery app works on twelve hand-written messages. This course takes it, one stage at a time, to what production would throw at it: customers it has seen before, conversations, work too open-ended for one step, streamed replies, services that fail, people who try to trick it, real traffic, and customers who rate it.
 
+![The queue building up through 120 requests](07-traffic/queue-building.gif)
+
+*Stage 07: 120 reworded requests arriving at random, from its run log. Orange is the time each customer waited in the queue, blue the agent working: median 5.9 minutes against 0.7. Every image in this repo comes from a recorded run, and its caption says how it was made.*
+
 Every stage is real: Gemini (free tier) with real tool calls and structured output, a real HTTP platform (orders, refund policy, fraud scoring, payments with idempotency keys, manager approvals), SQLite, and a test suite. Each stage README ends with real-run numbers and **where it breaks**. And at almost every stage the real runs found something nobody planned:
 
 | Stage | What the real run found |

@@ -52,6 +52,18 @@ What the numbers say:
 - **The output check is mostly wrong.** Of its 4 flags, one was real (riyal again, for a dollar refund) and **three were false positives**: replies that mentioned the $900 the customer demanded, the $32 that can't be refunded, the $500 approval limit. Those customers got a "correction" they didn't need. A guardrail's precision is something you only learn from traffic; part 3 measures it properly.
 - Tail latency is in the sub-agents: the two grey-zone cases had p50s of 94 and 113 s, and the p99 run took 275 s.
 
+![Two runs, one order, two refunds](race.png)
+
+*The first six requests, drawn from their run log ([`data/2026-10-20-0134-first-6.jsonl`](data/2026-10-20-0134-first-6.jsonl)) by [`viz/batch_charts.py`](../viz/batch_charts.py).*
+
+![The queue building up](queue-building.gif)
+
+*The 120-run batch, request by request, from its run log ([`data/2026-10-20-0137.jsonl`](data/2026-10-20-0137.jsonl)): orange is time waiting in the queue, blue the agent working. Frames drawn by [`viz/batch_charts.py`](../viz/batch_charts.py), assembled with ffmpeg.*
+
+![The model changed in the middle of the batch](model-switch.png)
+
+*Every run of the same batch, by the model that answered and its reply's time to first token, from the run log. The answers stayed right; only the latency gave the switch away.*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks

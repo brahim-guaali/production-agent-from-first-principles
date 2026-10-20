@@ -52,6 +52,10 @@ What the numbers say:
 - **Three of the five "wrong" runs were the grader's mistake.** When a customer sent the same message twice, the second copy was sometimes served *before* the first: the repeat got the refund and the original was refused. One refund per order, exactly as the policy says, but the grader expected the first-arrived message to get it. The other two were injected bad data, escalated as they should be. Under concurrency, "the expected answer" depends on order; graders need the same care as the agent (part 3).
 - **The version tags already earned their keep.** Every rating says which prompts and model produced it. If 3.1 Flash-Lite answers worse than 3.5, this is how you'd see it.
 
+![Waiting costs stars](ratings.png)
+
+*The 22 rated runs, from this stage's run log ([`data/`](data/)), by [`viz/batch_charts.py`](../viz/batch_charts.py).*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks

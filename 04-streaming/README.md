@@ -45,6 +45,10 @@ python 04-streaming/run.py             # stream | leave
 
 Customer leaves after the first piece ($640 late catering): the second piece got a 409, the stream stopped after 2 chunks, the chat shows "Hi there", the $640 was still paid, and the note ends "(the customer left before the reply finished)".
 
+![The model's first token vs the customer's first word](first-word.png)
+
+*Drawn from this stage's [`output.txt`](output.txt) by [`viz/batch_charts.py`](../viz/batch_charts.py).*
+
 Full output: [`output.txt`](output.txt).
 
 ## What the numbers say

@@ -42,6 +42,10 @@ python 03-sub-agents/run.py            # grey | policy | cases
 
 Most of a 15-second case isn't the model. Two calls at our own client-side limit of 8 requests a minute means 7.5 s of waiting each. Nothing reports that wait either.
 
+![The fraud reviewer at work](fraud-review.png)
+
+*The real hand-off for the 0.58 score ([`output.txt`](output.txt)), rendered with [`viz/terminal.py`](../viz/terminal.py): the sub-agent chose its own tools, checked both accounts on the shared device, and returned its verdict with the evidence.*
+
 Full output: [`output.txt`](output.txt).
 
 ## Where it breaks
