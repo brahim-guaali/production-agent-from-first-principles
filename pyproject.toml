@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-observability-from-first-principles"
+name = "production-agent-from-first-principles"
 version = "0.1.0"
-description = "A real refund agent, made realistic, then given a camera (traces, cost) and a referee (evals, a release gate)."
+description = "A refund agent taken from twelve hand-written cases to production: memory, conversations, sub-agents, streaming, failures, guardrails, traffic and signals."
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [

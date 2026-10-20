@@ -42,4 +42,4 @@ It works on twelve hand-written messages, one turn each, against services that e
 - **No traffic.** Twelve runs say nothing about p95 latency, cost per day or drift.
 - **No signal from outside.** Nobody knows if the customer was happy, or which prompt and model version produced an answer.
 
-Stages 01–05 fix these, one each, so the camera and the referee (06–11) have something real to watch. Next: [01 · memory](../01-memory/).
+Stages 01–08 fix these, one or two at a time. Next: [01 · memory](../01-memory/).
