@@ -1,5 +1,11 @@
 # A production agent from first principles
 
+> **Building an AI agent from first principles**, a series in four parts:
+> 1. [Graph engineering](https://github.com/brahim-guaali/graph-engineering-from-first-principles): the agent's design, from a naive loop to a LangGraph graph
+> 2. **A production agent** (this repo): memory, conversations, sub-agents, streaming, failures, guardrails, traffic, signals
+> 3. [Observability](https://github.com/brahim-guaali/agent-observability-from-first-principles): the camera (traces, cost, sampling, alerts, debugging)
+> 4. Evals: the referee (labels, checks, an LLM judge, a release gate) *(coming)*
+
 A course in runnable code. A refund agent for a food-delivery app works on twelve hand-written messages. This course takes it, one stage at a time, to what production would throw at it: customers it has seen before, conversations, work too open-ended for one step, streamed replies, services that fail, people who try to trick it, real traffic, and customers who rate it.
 
 Every stage is real: Gemini (free tier) with real tool calls and structured output, a real HTTP platform (orders, refund policy, fraud scoring, payments with idempotency keys, manager approvals), SQLite, and a test suite. Each stage README ends with real-run numbers and **where it breaks**. And at almost every stage the real runs found something nobody planned:
@@ -16,7 +22,7 @@ Every stage is real: Gemini (free tier) with real tool calls and structured outp
 | 07 | Run p50 45 s, **customer wait p50 6.6 minutes**: the queue, not the agent |
 | 08 | A correct refusal rated **1★**; a wait over 2 minutes cost more stars than any decision |
 
-The agent comes from [graph engineering from first principles](https://github.com/brahim-guaali/graph-engineering-from-first-principles) (part 1), where it was built from a naive loop into a LangGraph graph. What comes next: [agent observability from first principles](https://github.com/brahim-guaali/agent-observability-from-first-principles), where this agent gets a camera.
+The agent comes from part 1, where it was built from a naive loop into a LangGraph graph. Part 3 gives this agent a camera.
 
 ## The stages
 
