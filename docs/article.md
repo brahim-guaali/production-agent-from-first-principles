@@ -1,4 +1,4 @@
-# My AI agent passed every test. Then I gave it a memory, a queue and real customers
+# Your AI agent will pass every test and still refund the same order twice
 
 *Part 2 of 4 in **Building an AI agent from first principles**. [Part 1](https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921) built a refund agent from a naive loop into a graph. This part takes it to what production throws at it. Real model, real code, real numbers; every image comes from a recorded run.*
 
