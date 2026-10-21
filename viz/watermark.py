@@ -17,7 +17,11 @@ TEXT = "medium.com/@brahimg"
 FONT = "/System/Library/Fonts/Helvetica.ttc"
 
 FILES = [
-    # every image and video used in the READMEs, the write-up and social clips; added stage by stage
+    # every image and video used in the write-up and the posts
+    "00-baseline/paid-twice.png", "01-memory/before-after-memory.png", "03-sub-agents/fraud-review.png",
+    "04-streaming/first-word.png", "06-guardrails/riyal.png", "07-traffic/race.png",
+    "07-traffic/queue-building.gif", "07-traffic/queue-building.mp4", "07-traffic/model-switch.png",
+    "08-signals/ratings.png",
 ]
 
 

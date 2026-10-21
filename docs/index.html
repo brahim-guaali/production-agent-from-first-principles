@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My AI agent passed every test. Then I gave it a memory, a queue and real customers</title>
+<meta name="description" content="Part 2 of Building an AI agent from first principles: a refund agent meets memory, conversations, sub-agents, streaming, failures, guardrails, real traffic and customer ratings, with real runs.">
+<meta property="og:title" content="My AI agent passed every test. Then I gave it a memory, a queue and real customers">
+<meta property="og:description" content="Part 2 of Building an AI agent from first principles: a refund agent meets memory, conversations, sub-agents, streaming, failures, guardrails, real traffic and customer ratings, with real runs.">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/model-switch.png">
+<meta name="author" content="Brahim Guaali">
+<style>
+  :root { --text:#1a1a19; --muted:#52514e; --bg:#fcfcfb; --code:#f0efec; --link:#2a78d6; }
+  @media (prefers-color-scheme: dark) { :root { --text:#f2f2f0; --muted:#c3c2b7; --bg:#151514; --code:#232321; --link:#5a9bea; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:19px/1.65 Georgia, "Times New Roman", serif; }
+  article { max-width: 760px; margin: 0 auto; padding: 48px 16px 96px; }
+  h1 { font: 700 40px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0 0 12px; }
+  h2 { font: 700 26px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 44px 0 8px; }
+  a { color: var(--link); }
+  img { max-width: 100%; height: auto; border-radius: 6px; margin: 12px 0 0; display: block; }
+  img + em, p > em:only-child { display: block; color: var(--muted); font-size: 15px; line-height: 1.5; }
+  pre { background: var(--code); padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-size: 15px; line-height: 1.5; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; background: var(--code); padding: 1px 4px; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+  blockquote { margin: 16px 0; padding-left: 18px; border-left: 3px solid var(--muted); font-style: italic; }
+  .by { color: var(--muted); font: 15px -apple-system, BlinkMacSystemFont, sans-serif; margin-bottom: 32px; }
+</style>
+</head>
+<body>
+<article>
+<h1>My AI agent passed every test. Then I gave it a memory, a queue and real customers</h1>
+<div class="by">Brahim Guaali · <a href="https://github.com/brahim-guaali/production-agent-from-first-principles">code on GitHub</a></div>
+<p><em>Part 2 of 4 in <strong>Building an AI agent from first principles</strong>. <a href="https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921">Part 1</a> built a refund agent from a naive loop into a graph. This part takes it to what production throws at it. Real model, real code, real numbers; every image comes from a recorded run.</em></p>
+
+<p>At the end of part 1, my refund agent got 12 hand-written cases out of 12 right. It ran its lookups in parallel, survived crashes, waited days for a manager and never paid twice.</p>
+<p>Then I asked the same customer to send the same message on two different days, and it paid twice.</p>
+<p><img alt="Paid twice" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/00-baseline/paid-twice.png" /></p>
+<p><em>Two real runs, two idempotency keys, two payments: $144 for a $72 order.</em></p>
+<p>The idempotency key from part 1 stops one run from paying twice after a crash. It does nothing for a second run on Tuesday. The agent had no memory of the customer at all.</p>
+<p>That was the first of many things a clean test set never shows. So I spent eight stages giving the agent what production would demand, one at a time, and let real runs on a free Gemini key show me what broke. All of it is runnable: <strong><a href="https://github.com/brahim-guaali/production-agent-from-first-principles">github.com/brahim-guaali/production-agent-from-first-principles</a></strong></p>
+<h2>1. Memory</h2>
+<p>The platform now remembers each customer: past refunds, how many in the last 30 days, and a one-line note every run leaves for the next. The agent reads it before deciding, and two rules are enforced in code, not trusted to the model: an order that was already refunded can't be refunded again (§7), and a customer with three refunds this month needs a manager even for $15 (§8).</p>
+<p><img alt="Without and with memory" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/01-memory/before-after-memory.png" /></p>
+<p>14 cases out of 14 right. But each case took 45 seconds, and nothing in the output said why. A separate probe did: Gemini 3.5 Flash's free tier allows <strong>20 requests a day</strong>, and we were past it. Every call got a 429, waited out two back-offs, and quietly fell back to Flash-Lite. Fourteen right answers from a model I never chose. My client now records which model answered every call, and I never write a model name in a result without checking it.</p>
+<h2>2. Conversations and sub-agents</h2>
+<p>"Why only $72? I also paid delivery and a tip" is not a new refund request. Every run now belongs to a session, and a follow-up goes to an <code>explain</code> step that answers from the conversation. Its first answer was "fees and tips are excluded". Plausible, and not in the policy: the model filled a gap.</p>
+<p>So I gave the agent two specialists with their own tools. A <strong>policy expert</strong> searches the policy and an FAQ before anything is explained (now the answer cites the FAQ entry it found). A <strong>fraud reviewer</strong> takes the cases where the fraud score is neither clearly fine nor clearly bad.</p>
+<p><img alt="The fraud reviewer at work" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/03-sub-agents/fraud-review.png" /></p>
+<p>For a 0.58 score it pulled the customer's devices, saw one shared with two other accounts, checked both, found one at 0.86, and refused. For a 0.47 score it found a device shared within one household and let the refund through. Nobody scripted those steps.</p>
+<p>The cost was invisible: one uncovered question ("will you pay me for the hour I waited?") took four searches and 55 seconds.</p>
+<h2>3. Streaming, and whose first token</h2>
+<p>Chat products stream replies, so the customer sees words appear. The usual metric is time to first token. Mine was 0.6 seconds. The customer saw the first word after 15.6.</p>
+<p><img alt="First token vs first word" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/04-streaming/first-word.png" /></p>
+<p>The reply is the last step of the run, so streaming it doesn't help much. Time to first token is a number about the model. What the customer feels is the time from <em>their</em> message to <em>their</em> first word.</p>
+<h2>4. Failures, and "riyal"</h2>
+<p>Real services don't just hang. They answer 500, send half a record, or say 404 because the customer mistyped the order number. The model returns JSON that doesn't fit, or hits a quota. I made every one of those <em>data</em>: retried when it's worth retrying, recorded when not, and explained to the customer in plain words ("we couldn't load your order details just now; a colleague will pick this up today").</p>
+<p>Then a guardrail stage: prompt-injection detection in two layers (cheap rules on every message, a model check only when the rules are unsure: one model call in 18 messages), and a fact check on the reply. It caught this:</p>
+<p><img alt="The riyal reply" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/06-guardrails/riyal.png" /></p>
+<p>The decision was right, the amount was right, and the currency was invented, because it fit the language. The check runs after the reply is sent (a stream can't be unsent), so a short correction follows.</p>
+<h2>5. Traffic</h2>
+<p>Eighteen messages, one at a time, say almost nothing about a Friday night. So I built a replayer: each case cloned onto a fresh order and customer, reworded (typos, all caps, an Arabic greeting in front of English), arriving at random, three served at once, and one customer in twelve sending the same message twice.</p>
+<p>The first six requests found a real bug.</p>
+<p><img alt="Two runs, one order, two refunds" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/race.png" /></p>
+<p>A customer sent the same message twice, 0.2 seconds apart. Both runs read a history with no refund in it, and both paid. The fix was one idempotency key per <em>order</em> instead of per run; the second payment now comes back "already done" and that customer is told so.</p>
+<p>Then the full batch, 120 requests:</p>
+<p><img alt="The queue building up" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/queue-building.gif" /></p>
+<p>The agent took 45 seconds at the median. Customers waited <strong>six minutes</strong>, because six arrived a minute and my client allows itself twelve model calls a minute, to stay under the free tier. And halfway through, the model changed:</p>
+<p><img alt="The model switch" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/model-switch.png" /></p>
+<p>3.5 Flash-Lite ran out of its daily quota, the client fell back to 3.1, and every answer stayed right. Only the time to first token gave it away: 0.76 seconds before, 3 after.</p>
+<h2>6. Signals</h2>
+<p>The last stage asked customers what they thought, and stamped every run with the versions that produced it (a hash of every prompt, the agent's commit, the model that answered, the environment). Two lessons from 22 ratings. A correct refusal still gets 1★: ratings measure happiness, not correctness, and you need both. And waiting costs more stars than any decision:</p>
+<p><img alt="Ratings by wait" src="https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/08-signals/ratings.png" /></p>
+<h2>What I'd tell myself</h2>
+<ol>
+<li><strong>Memory is a correctness feature</strong>, not a nice-to-have. Without it, safety rules like "never refund twice" can't even be checked.</li>
+<li><strong>Record which model answered.</strong> Fallbacks happen silently, even when every answer is right.</li>
+<li><strong>Measure what the customer feels</strong>: message to first word, queue included.</li>
+<li><strong>Make failures data</strong>, so the run can route on them and the customer hears what happened.</li>
+<li><strong>Run traffic, with repeats and concurrency</strong>, before trusting any result. Six requests found what eighteen careful cases never could.</li>
+<li><strong>Ask the customer</strong>, and keep the versions on every run so a bad week can be traced to a change.</li>
+</ol>
+<p>And the uncomfortable one: after eight stages, the agent was far better, and I could say <em>less</em> about it than ever. Each finding above came from a probe, a run log or luck. Why did one run take 93 seconds instead of 22? Which step, which call, which retry? Nothing could say.</p>
+<p>That's part 3: giving the agent a camera.</p>
+
+<p><strong>The series</strong>, <em>Building an AI agent from first principles</em>:
+1. <a href="https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921">Part 1, graph engineering</a>: from a naive loop to a graph (<a href="https://github.com/brahim-guaali/graph-engineering-from-first-principles">code</a>)
+2. <strong>Part 2, a production agent</strong> (this article, <a href="https://github.com/brahim-guaali/production-agent-from-first-principles">code</a>)
+3. Part 3, observability: the camera <em>(17 November)</em>
+4. Part 4, evals: the referee <em>(24 November)</em></p>
+</article>
+</body>
+</html>

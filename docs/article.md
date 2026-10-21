@@ -96,7 +96,7 @@ That's part 3: giving the agent a camera.
 ---
 
 **The series**, *Building an AI agent from first principles*:
-1. [Graph engineering](https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921): from a naive loop to a graph ([code](https://github.com/brahim-guaali/graph-engineering-from-first-principles))
-2. **A production agent** (this article, [code](https://github.com/brahim-guaali/production-agent-from-first-principles))
-3. Observability: the camera *(coming)*
-4. Evals: the referee *(coming)*
+1. [Part 1, graph engineering](https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921): from a naive loop to a graph ([code](https://github.com/brahim-guaali/graph-engineering-from-first-principles))
+2. **Part 2, a production agent** (this article, [code](https://github.com/brahim-guaali/production-agent-from-first-principles))
+3. Part 3, observability: the camera *(17 November)*
+4. Part 4, evals: the referee *(24 November)*
