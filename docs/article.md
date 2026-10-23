@@ -68,7 +68,7 @@ Then the full batch, 120 requests:
 
 ![The queue building up](https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/queue-building.gif)
 
-The agent took 45 seconds at the median. Customers waited **six minutes**, because six arrived a minute and my client allows itself twelve model calls a minute, to stay under the free tier. And halfway through, the model changed:
+The agent took 45 seconds at the median. The median customer waited **over six minutes**, because six arrived a minute and my client allows itself twelve model calls a minute, to stay under the free tier. And halfway through, the model changed:
 
 ![The model switch](https://raw.githubusercontent.com/brahim-guaali/production-agent-from-first-principles/main/07-traffic/model-switch.png)
 
@@ -98,5 +98,5 @@ That's part 3: giving the agent a camera.
 **The series**, *Building an AI agent from first principles*:
 1. [Part 1, graph engineering](https://medium.com/@brahimg/i-rebuilt-one-ai-agent-seven-times-to-understand-graph-engineering-80b9983cd921): from a naive loop to a graph ([code](https://github.com/brahim-guaali/graph-engineering-from-first-principles))
 2. **Part 2, a production agent** (this article, [code](https://github.com/brahim-guaali/production-agent-from-first-principles))
-3. Part 3, observability: the camera *(17 November)*
-4. Part 4, evals: the referee *(24 November)*
+3. Part 3, observability: the camera *(3 November)*
+4. Part 4, evals: the referee *(10 November)*
