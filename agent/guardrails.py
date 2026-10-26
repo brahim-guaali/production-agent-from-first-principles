@@ -9,7 +9,7 @@ be unsent): any money amount must match the decision, and the currency must be d
 failed check sends the customer a correction.
 
 Every check leaves an event {stage, check, verdict, evidence}, so it can be counted, alerted
-on and traced later (part 2).
+on and traced later (part 3).
 """
 import re
 

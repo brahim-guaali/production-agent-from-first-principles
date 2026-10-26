@@ -1,4 +1,4 @@
-"""The verifier (checks that are certain from the facts), carried over from the graph-engineering course."""
+"""The verifier (checks that are certain from the facts), carried over from part 1 (graph engineering)."""
 
 
 def check(d, order, policy, fraud, history=None, review=None):

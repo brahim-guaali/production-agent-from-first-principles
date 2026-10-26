@@ -1,4 +1,4 @@
-"""The refund agent: a LangGraph graph, started in the graph-engineering course.
+"""The refund agent: a LangGraph graph, started in part 1 (graph engineering).
 
 classify -> (order, policy, fraud, history in parallel) -> decide -> verify -> manager approval
 if the amount is over $500 or the customer had 3+ refunds in 30 days -> refund (with an

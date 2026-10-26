@@ -26,7 +26,7 @@ The first batch was a smoke test of 6 requests. Five were right. The sixth was a
 
 Both runs read the customer's history before either had paid, so both saw no refund. The idempotency key from part 1 (`<run>:refund`) stops one run from paying twice when it's replayed after a crash, but two *different* runs had two different keys. The fix: one key per order (`<order>:refund`). The second payment now comes back as `replayed`, no money moves, and that run tells the customer the order was already refunded. A test now runs two agents for one order at the same moment.
 
-Twelve one-at-a-time cases could never have found that.
+Eighteen one-at-a-time cases could never have found that.
 
 ## Real run (gemini-3.5-flash-lite, 2026-10-20)
 
@@ -46,10 +46,10 @@ Twelve one-at-a-time cases could never have found that.
 
 What the numbers say:
 
-- **The queue, not the agent, is what customers feel.** A run took 45 s at the median, but a customer waited 6.6 minutes, because arrivals outpaced the 12-requests-a-minute model limit. Per-run timings would never show it: the wait happens before the run starts.
+- **The queue, not the agent, is what customers feel.** A run took 45 s at the median, but a customer waited 6.6 minutes from message to reply (queue + run), because arrivals outpaced the 12-requests-a-minute model limit. Per-run timings would never show it: the wait happens before the run starts.
 - **The fallback model answered more than a third of the calls**, silently and correctly. Whether its answers are as good is something the case set alone can't say for every message.
 - **A fault meant for one request hit another.** Faults are injected platform-wide, and with three workers in flight one run's broken order record was served to a different run. The log blames the wrong request; only per-request traces can say which call actually failed.
-- **The output check is mostly wrong.** Of its 4 flags, one was real (riyal again, for a dollar refund) and **three were false positives**: replies that mentioned the $900 the customer demanded, the $32 that can't be refunded, the $500 approval limit. Those customers got a "correction" they didn't need. A guardrail's precision is something you only learn from traffic; part 3 measures it properly.
+- **The output check is mostly wrong.** Of its 4 flags, one was real (riyal again, for a dollar refund) and **three were false positives**: replies that mentioned the $900 the customer demanded, the $32 that can't be refunded, the $500 approval limit. Those customers got a "correction" they didn't need. A guardrail's precision is something you only learn from traffic; part 4 measures it properly.
 - Tail latency is in the sub-agents: the two grey-zone cases had p50s of 94 and 113 s, and the p99 run took 275 s.
 
 ![Two runs, one order, two refunds](race.png)

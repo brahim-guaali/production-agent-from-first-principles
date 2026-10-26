@@ -3,21 +3,21 @@
 > **Building an AI agent from first principles**, a series in four parts:
 > 1. [Graph engineering](https://github.com/brahim-guaali/graph-engineering-from-first-principles): the agent's design, from a naive loop to a LangGraph graph
 > 2. **A production agent** (this repo): memory, conversations, sub-agents, streaming, failures, guardrails, traffic, signals
-> 3. [Observability](https://github.com/brahim-guaali/agent-observability-from-first-principles): the camera (traces, cost, sampling, alerts, debugging)
-> 4. Evals: the referee (labels, checks, an LLM judge, a release gate) *(coming)*
+> 3. Observability: the camera (traces, cost, sampling, alerts, debugging) *(part 3, 3 November)*
+> 4. Evals: the referee (labels, checks, an LLM judge, a release gate) *(part 4, 10 November)*
 
-A course in runnable code. A refund agent for a food-delivery app works on twelve hand-written messages. This course takes it, one stage at a time, to what production would throw at it: customers it has seen before, conversations, work too open-ended for one step, streamed replies, services that fail, people who try to trick it, real traffic, and customers who rate it.
+An engineering deep dive in runnable code. A refund agent for a food-delivery app works on twelve hand-written messages. This deep dive takes it, one stage at a time, to what production would throw at it: customers it has seen before, conversations, work too open-ended for one step, streamed replies, services that fail, people who try to trick it, real traffic, and customers who rate it.
 
 ![The queue building up through 120 requests](07-traffic/queue-building.gif)
 
-*Stage 07: 120 reworded requests arriving at random, from its run log. Orange is the time each customer waited in the queue, blue the agent working: median 5.9 minutes against 0.7. Every image in this repo comes from a recorded run, and its caption says how it was made.*
+*Stage 07: 120 reworded requests arriving at random, from its run log. Orange is the time each customer waited in the queue, blue the agent working: median 5.9 minutes queued against 0.7 working (6.6 minutes from message to reply). Every image in this repo comes from a recorded run, and its caption says how it was made.*
 
-Every stage is real: Gemini (free tier) with real tool calls and structured output, a real HTTP platform (orders, refund policy, fraud scoring, payments with idempotency keys, manager approvals), SQLite, and a test suite. Each stage README ends with real-run numbers and **where it breaks**. And at almost every stage the real runs found something nobody planned:
+Every stage is real: Gemini with real tool calls and structured output, a real HTTP platform (orders, refund policy, fraud scoring, payments with idempotency keys, manager approvals), SQLite, and a test suite. Each stage README ends with real-run numbers and **where it breaks**. And at almost every stage the real runs found something nobody planned:
 
 | Stage | What the real run found |
 |---|---|
 | 00 | The same $72 request on two days was refunded twice: **$144 for a $72 order** |
-| 01 | **14/14 right on a model nobody configured**: the free tier's 20 requests a day ran out and every call fell back to another model, silently |
+| 01 | **14/14 right on a model nobody configured**: the project's 20 requests a day ran out and almost every call fell back to another model, silently |
 | 03 | A fraud-review sub-agent found a device shared with a known fraud account by itself; an uncovered question cost 4 searches and 55 s |
 | 04 | The model's first token came after 0.6 s; **the customer's first word after 15.6 s** |
 | 04, 06 | A reply told a customer their refund was in **riyals**, for a dollar order |
@@ -65,4 +65,4 @@ Open http://127.0.0.1:8710/ui while a stage runs to watch it live.
 | [`services/`](services/) | The food-delivery platform (FastAPI + SQLite) and the live run viewer |
 | [`tests/`](tests/) | Run without a key: a scripted model stands in for Gemini |
 
-MIT licensed. All data is made up.
+MIT licensed. Built on personal time with made-up data; it isn't based on any employer's systems.

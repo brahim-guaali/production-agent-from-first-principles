@@ -14,7 +14,7 @@ Two things a run can't know about itself: what the customer thought of the answe
 | `environment` | `dev`, `staging` or `prod` (`AGENT_ENV`) |
 | `model_versions` | what Gemini says answered (`response.model_version`), not only what we asked for |
 
-Change one word in one prompt and only that prompt's hash and the set's hash change. That's how a dashboard gets filtered by version, and how the A/B test in stage 16 tells its arms apart.
+Change one word in one prompt and only that prompt's hash and the set's hash change. That's how a dashboard gets filtered by version, and how an A/B test tells its arms apart (part 3).
 
 ## Run it
 
@@ -49,7 +49,7 @@ What the numbers say:
 
 - **A correct answer can still be a 1★.** The three refusals were right (the order had already been refunded) and rated 1. Ratings measure the customer's happiness, not the agent's correctness; you need both, and you can't infer one from the other.
 - **Waiting costs more stars than anything the agent decides.** Over 120 s, refunds were rated 2★ too. In this batch the wait was mostly the queue, again.
-- **Three of the five "wrong" runs were the grader's mistake.** When a customer sent the same message twice, the second copy was sometimes served *before* the first: the repeat got the refund and the original was refused. One refund per order, exactly as the policy says, but the grader expected the first-arrived message to get it. The other two were injected bad data, escalated as they should be. Under concurrency, "the expected answer" depends on order; graders need the same care as the agent (part 3).
+- **Three of the five "wrong" runs were the grader's mistake.** When a customer sent the same message twice, the second copy was sometimes served *before* the first: the repeat got the refund and the original was refused. One refund per order, exactly as the policy says, but the grader expected the first-arrived message to get it. The other two were injected bad data, escalated as they should be. Under concurrency, "the expected answer" depends on order; graders need the same care as the agent (part 4).
 - **The version tags already earned their keep.** Every rating says which prompts and model produced it. If 3.1 Flash-Lite answers worse than 3.5, this is how you'd see it.
 
 ![Waiting costs stars](ratings.png)
@@ -60,4 +60,4 @@ Full output: [`output.txt`](output.txt).
 
 ## Where it breaks
 
-The agent now remembers, converses, delegates, streams, fails gracefully, has guardrails, takes traffic and carries its versions. And we can say less about it than ever. The log has one line per run: a total time, a cost, a list of events. When a run took 93 s instead of 22, the line can't say which step, which call, which retry. When a rating is 1★, it can't show what the customer saw happen. Everything we printed so far was assembled by hand for one demo. The next course gives it a camera: [agent observability from first principles](https://github.com/brahim-guaali/agent-observability-from-first-principles).
+The agent now remembers, converses, delegates, streams, fails gracefully, has guardrails, takes traffic and carries its versions. And we can say less about it than ever. The log has one line per run: a total time, a cost, a list of events. When a run took 93 s instead of 22, the line can't say which step, which call, which retry. When a rating is 1★, it can't show what the customer saw happen. Everything we printed so far was assembled by hand for one demo. Next, part 3 (3 November) gives it a camera: agent observability from first principles.

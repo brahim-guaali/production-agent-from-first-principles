@@ -9,7 +9,7 @@ Poisson process, and a few workers serve them in parallel, so a busy minute queu
 Everything about every run is appended to a JSONL log: what arrived when, how long it waited,
 how long it ran, what it decided against what the case expects, tokens, cost, model events,
 guardrail verdicts and failures. That log is what the dashboards, percentiles, sampling and
-alerts of part 2 are computed from.
+alerts of part 3 are computed from.
 """
 import json
 import queue

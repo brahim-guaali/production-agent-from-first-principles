@@ -15,7 +15,7 @@ flowchart LR
     explain --> pe[[policy_expert sub-agent]]
 ```
 
-A sub-agent ends by calling `finish` with a typed result, so the graph gets data, not prose. The verifier holds the decision to it (a high-risk review means refuse, §9, whatever the main model says). Every hand-off is kept in the state as a record: who asked, which sub-agent, the task, each tool call with its result, the verdict and the time. In part 2 each record becomes an `invoke_agent` span with its tool calls nested underneath, the parent/child shape agent tracing is built around. The code is in [`agent/subagents.py`](../agent/subagents.py).
+A sub-agent ends by calling `finish` with a typed result, so the graph gets data, not prose. The verifier holds the decision to it (a high-risk review means refuse, §9, whatever the main model says). Every hand-off is kept in the state as a record: who asked, which sub-agent, the task, each tool call with its result, the verdict and the time. In part 3 each record becomes an `invoke_agent` span with its tool calls nested underneath, the parent/child shape agent tracing is built around. The code is in [`agent/subagents.py`](../agent/subagents.py).
 
 ## What changed
 

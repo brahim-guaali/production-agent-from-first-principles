@@ -3,7 +3,7 @@
 A sub-agent is a small agent loop with its own name, instructions and tools. It gets a task
 in plain words, calls its tools as it sees fit, and ends by calling `finish` with a typed
 result, so the main graph gets data back, not prose. Every hand-off is recorded (who asked,
-which sub-agent, the task, each tool call, the result) because in part 2 each one becomes an
+which sub-agent, the task, each tool call, the result) because in part 3 each one becomes an
 `invoke_agent` span with the tool calls nested under it.
 """
 import json

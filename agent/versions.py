@@ -3,7 +3,7 @@
 Every prompt gets a short hash of its text, and the whole set a hash of those, so two runs
 with the same `prompt_set` ran the same instructions. Change one word in any prompt and
 the hash changes: that's how a dashboard can be filtered by version, and how an A/B test
-(stage 16) tells its arms apart. `agent` is the git commit of this repo.
+(part 3) tells its arms apart. `agent` is the git commit of this repo.
 """
 import hashlib
 import os

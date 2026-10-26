@@ -21,7 +21,7 @@ flowchart LR
 | Agent | A `session` node first (loads earlier turns, stores the new message). `classify` sees the conversation and can answer `follow_up`. `explain` (a third model judgment) answers it or sets `wants_person`. Every ending (`reply`, `explain`, `support`, `escalate`) stores the agent's turn |
 | Routing | A follow-up with no earlier turns has nothing to explain, so it goes to the support loop |
 
-One conversation is now **several runs**. That's the shape observability tools call a *session* (OpenTelemetry's `gen_ai.conversation.id`): in part 2 every span carries the session id, so the three runs below show up as one conversation.
+One conversation is now **several runs**. That's the shape observability tools call a *session* (OpenTelemetry's `gen_ai.conversation.id`): in part 3 every span carries the session id, so the three runs below show up as one conversation.
 
 ## Run it
 
@@ -46,5 +46,5 @@ Full output: [`output.txt`](output.txt).
 
 ## Where it breaks
 
-- **The answer said more than the facts.** "Delivery fees and tips are excluded" sounds right, but the policy never mentions fees or tips: the model filled the gap. Nothing checks that an explanation is *grounded* in the policy and the record. That's an eval (part 3).
+- **The answer said more than the facts.** "Delivery fees and tips are excluded" sounds right, but the policy never mentions fees or tips: the model filled the gap. Nothing checks that an explanation is *grounded* in the policy and the record. That's an eval (part 4).
 - **One agent does everything.** Fraud review is a single score from one endpoint, and policy questions are answered from the whole policy pasted into a prompt. Real systems hand pieces of work to specialised agents, and a trace needs to show who did what. Next: [03 · sub-agents](../03-sub-agents/).
